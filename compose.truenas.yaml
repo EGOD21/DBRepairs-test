@@ -53,7 +53,7 @@ services:
     pull_policy: always
     restart: unless-stopped
     ports:
-      - "31500:80"
+      - "31500:8080"
     depends_on:
       api:
         condition: service_healthy
