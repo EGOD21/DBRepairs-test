@@ -47,7 +47,7 @@ services:
       context: .
     restart: unless-stopped
     ports:
-      - "${DBREPAIRS_PORT:-8080}:80"
+      - "${DBREPAIRS_PORT:-8080}:8080"
     depends_on:
       api:
         condition: service_healthy
