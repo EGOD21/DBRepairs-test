@@ -1,39 +1,37 @@
 import { useEffect, useState } from "react";
-import CustomersPage from "./pages/CustomersPage";
 import LanguageDropdown from "./components/LanguageDropdown";
-import SettingsPage from "./pages/SettingsPage";
-import RepairsPage from "./pages/RepairsPage";
-import {
-  DashboardRecentRepair,
-  DashboardStats,
-  getDashboardStats,
-  listDashboardRecentRepairs,
-} from "./data/dashboard";
+import Icon, { IconName } from "./components/Icon";
 import { useI18n } from "./i18n/I18nProvider";
-import LoginPage from "./pages/LoginPage";
-import { getSession, logout, unauthorizedEvent } from "./data/api";
+import { useBranding } from "./branding";
+import { getSession, logout, SessionUser, unauthorizedEvent } from "./data/api";
 import { isServerMode } from "./data/runtime";
+import { listParts } from "./data/parts";
+import { href, Route, useRoute } from "./router";
+import LoginPage from "./pages/LoginPage";
+import DashboardPage from "./pages/DashboardPage";
+import RepairsPage from "./pages/RepairsPage";
+import RepairDetailPage from "./pages/RepairDetailPage";
+import CustomersPage from "./pages/CustomersPage";
+import CustomerProfilePage from "./pages/CustomerProfilePage";
+import PartsPage from "./pages/PartsPage";
+import SettingsPage from "./pages/SettingsPage";
+import ChatPage from "./pages/ChatPage";
+import { SessionProvider, useSession } from "./session";
+import { getLastSeen, unreadCount } from "./data/chat";
 
-type Page = "dashboard" | "repairs" | "customers" | "settings";
 type AuthState = "checking" | "signedOut" | "signedIn";
-
-const emptyStats: DashboardStats = {
-  openRepairs: 0,
-  waitingCustomer: 0,
-  ready: 0,
-  closedToday: 0,
-};
 
 export default function App() {
   const { t } = useI18n();
   const [auth, setAuth] = useState<AuthState>(isServerMode ? "checking" : "signedIn");
+  const [user, setUser] = useState<SessionUser | null>(null);
 
   useEffect(() => {
     if (!isServerMode) return;
     const signedOut = () => setAuth("signedOut");
     window.addEventListener(unauthorizedEvent, signedOut);
     getSession()
-      .then((authenticated) => setAuth(authenticated ? "signedIn" : "signedOut"))
+      .then((current) => { setUser(current); setAuth(current ? "signedIn" : "signedOut"); })
       .catch((error) => {
         console.error("Session check failed:", error);
         setAuth("signedOut");
@@ -41,146 +39,98 @@ export default function App() {
     return () => window.removeEventListener(unauthorizedEvent, signedOut);
   }, []);
 
-  if (auth === "checking") return <div className="login-shell">{t("common.loading")}</div>;
-  if (auth === "signedOut") return <LoginPage onSignedIn={() => setAuth("signedIn")} />;
-  return <Workspace onSignOut={isServerMode ? () => void logout().finally(() => setAuth("signedOut")) : undefined} />;
+  if (auth === "checking") return <div className="login-shell muted">{t("common.loading")}</div>;
+  if (auth === "signedOut") return <LoginPage onSignedIn={(current) => { setUser(current); setAuth("signedIn"); }} />;
+  return (
+    <SessionProvider user={user}>
+      <Workspace onSignOut={isServerMode ? () => void logout().finally(() => { setUser(null); setAuth("signedOut"); }) : undefined} />
+    </SessionProvider>
+  );
+}
+
+const collapsedKey = "dbrepairs.sidebarCollapsed";
+
+function readCollapsed() {
+  try { return localStorage.getItem(collapsedKey) === "true"; } catch { return false; }
 }
 
 function Workspace({ onSignOut }: { onSignOut?: () => void }) {
   const { t, locale, setLocale, locales } = useI18n();
-  const [page, setPage] = useState<Page>("dashboard");
-  const [dashboardStats, setDashboardStats] = useState<DashboardStats>(emptyStats);
-  const [recentRepairs, setRecentRepairs] = useState<DashboardRecentRepair[]>([]);
-  const [dashboardLoading, setDashboardLoading] = useState(false);
-  const [dashboardError, setDashboardError] = useState(false);
+  const { companyName, logo } = useBranding();
+  const route = useRoute();
+  const [collapsed, setCollapsed] = useState(readCollapsed);
+  const { user, teamFeatures } = useSession();
+  const [partsToOrder, setPartsToOrder] = useState(0);
+  const [unread, setUnread] = useState(0);
 
   useEffect(() => {
-    if (page !== "dashboard") return;
+    listParts("needed").then((parts) => setPartsToOrder(parts.length)).catch(() => setPartsToOrder(0));
+  }, [route]);
 
-    let active = true;
-    setDashboardLoading(true);
-    setDashboardError(false);
+  // New team messages since this browser last opened the chat.
+  useEffect(() => {
+    if (!teamFeatures) return;
+    if (route.name === "chat") { setUnread(0); return; }
+    const check = () => unreadCount(getLastSeen()).then((r) => setUnread(r.count)).catch(() => {});
+    void check();
+    const timer = window.setInterval(check, 30000);
+    return () => window.clearInterval(timer);
+  }, [route, teamFeatures]);
 
-    Promise.all([getDashboardStats(), listDashboardRecentRepairs()])
-      .then(([stats, repairs]) => {
-        if (!active) return;
-        setDashboardStats(stats);
-        setRecentRepairs(repairs);
-      })
-      .catch((error) => {
-        console.error("Dashboard database error:", error);
-        if (active) setDashboardError(true);
-      })
-      .finally(() => {
-        if (active) setDashboardLoading(false);
-      });
+  function toggle() {
+    setCollapsed((value) => {
+      try { localStorage.setItem(collapsedKey, String(!value)); } catch { /* not remembered, still works */ }
+      return !value;
+    });
+  }
 
-    return () => {
-      active = false;
-    };
-  }, [page]);
-
-  const languageControl = (
-    <LanguageDropdown
-      locale={locale}
-      setLocale={setLocale}
-      locales={locales}
-      label={t("settings.language")}
-      searchLabel={t("settings.searchLanguage")}
-    />
-  );
-
-  const cards = [
-    ["dashboard.openRepairs", dashboardStats.openRepairs],
-    ["dashboard.waitingCustomer", dashboardStats.waitingCustomer],
-    ["dashboard.ready", dashboardStats.ready],
-    ["dashboard.closedToday", dashboardStats.closedToday],
-  ] as const;
-
-  const deviceLabel = (repair: DashboardRecentRepair) =>
-    [repair.device_type, repair.brand, repair.model].filter(Boolean).join(" · ") || "—";
+  const section = route.name === "repair" ? "repairs" : route.name === "customer" ? "customers" : route.name;
+  const links: { route: Route; icon: IconName; label: string; badge?: number }[] = [
+    { route: { name: "dashboard" }, icon: "dashboard", label: t("nav.dashboard") },
+    { route: { name: "repairs" }, icon: "wrench", label: t("nav.repairs") },
+    { route: { name: "customers" }, icon: "users", label: t("nav.customers") },
+    { route: { name: "parts" }, icon: "package", label: t("nav.parts"), badge: partsToOrder || undefined },
+    ...(teamFeatures ? [{ route: { name: "chat" } as Route, icon: "message" as IconName, label: t("nav.chat"), badge: unread || undefined }] : []),
+    { route: { name: "settings" }, icon: "settings", label: t("nav.settings") },
+  ];
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell${collapsed ? " collapsed" : ""}`}>
       <aside className="sidebar">
-        <div className="brand"><img src="/dbrepairs-icon.png" alt="" /><div>DBRepairs <span>{__APP_VERSION__}</span></div></div>
-        <nav>
-          <button className={page === "dashboard" ? "active" : ""} onClick={() => setPage("dashboard")}>{t("nav.dashboard")}</button>
-          <button className={page === "repairs" ? "active" : ""} onClick={() => setPage("repairs")}>{t("nav.repairs")}</button>
-          <button className={page === "customers" ? "active" : ""} onClick={() => setPage("customers")}>{t("nav.customers")}</button>
-          <button className={page === "settings" ? "active" : ""} onClick={() => setPage("settings")}>{t("nav.settings")}</button>
+        <div className="sidebar-brand" title={companyName}>
+          <img src={logo} alt="" />
+          <div className="sidebar-brand-text"><strong>{companyName}</strong><span>DBRepairs {__APP_VERSION__}</span></div>
+        </div>
+        <nav className="sidebar-nav" aria-label={t("nav.main")}>
+          {links.map((link) => (
+            <a key={link.route.name} href={href(link.route)} className={`sidebar-link${section === link.route.name ? " active" : ""}`} title={collapsed ? link.label : undefined}>
+              <Icon name={link.icon} /><span className="sidebar-label">{link.label}</span>{link.badge ? <span className="badge">{link.badge}</span> : null}
+            </a>
+          ))}
         </nav>
-        <div className="sidebar-language">
-          {languageControl}
-          {onSignOut && <button type="button" className="sidebar-logout" onClick={onSignOut}>{t("auth.signOut")}</button>}
+        <div className="sidebar-footer">
+          <div className="sidebar-language">
+            <LanguageDropdown locale={locale} setLocale={setLocale} locales={locales} label={t("settings.language")} searchLabel={t("settings.searchLanguage")} />
+          </div>
+          {onSignOut && (
+            <button type="button" className="sidebar-link" onClick={onSignOut} title={`${t("auth.signOut")}${user ? ` (${user.displayName})` : ""}`}>
+              <Icon name="logout" /><span className="sidebar-label truncate">{t("auth.signOut")}{user ? ` · ${user.displayName}` : ""}</span>
+            </button>
+          )}
+          <button type="button" className="sidebar-link sidebar-collapse" onClick={toggle} aria-pressed={collapsed} title={collapsed ? t("nav.expand") : t("nav.collapse")}>
+            <Icon name="panel" /><span className="sidebar-label">{t("nav.collapse")}</span>
+          </button>
         </div>
       </aside>
-
-      <main>
-        {page === "dashboard" && (
-          <>
-            <header>
-              <div>
-                <h1>{t("dashboard.title")}</h1>
-                <p>{t("dashboard.subtitle")}</p>
-              </div>
-            </header>
-
-            <section className="cards">
-              {cards.map(([label, value]) => (
-                <article className="card" key={label}>
-                  <strong>{dashboardLoading ? "…" : value}</strong>
-                  <span>{t(label)}</span>
-                </article>
-              ))}
-            </section>
-
-            <section className="panel">
-              <div className="panel-head">
-                <div>
-                  <h2>{t("repairs.title")}</h2>
-                  <p>{t("repairs.emptyHint")}</p>
-                </div>
-                <button className="primary" onClick={() => setPage("repairs")}>+ {t("repair.new")}</button>
-              </div>
-
-              {dashboardError ? (
-                <div className="empty-state">{t("database.error")}</div>
-              ) : recentRepairs.length === 0 ? (
-                <div className="empty-state">{dashboardLoading ? "…" : t("repairs.empty")}</div>
-              ) : (
-                <div className="table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>{t("repair.number")}</th>
-                        <th>{t("repair.customer")}</th>
-                        <th>{t("repair.device")}</th>
-                        <th>{t("repair.status")}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {recentRepairs.map((repair) => (
-                        <tr key={repair.id}>
-                          <td><strong>{repair.repair_number}</strong></td>
-                          <td>{repair.customer_name}</td>
-                          <td>{deviceLabel(repair)}</td>
-                          <td>{t(repair.status_label_key)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </section>
-          </>
-        )}
-
-        {page === "customers" && <CustomersPage />}
-
-        {page === "repairs" && <RepairsPage />}
-
-        {page === "settings" && <SettingsPage />}
+      <main className="main">
+        {route.name === "dashboard" && <DashboardPage />}
+        {route.name === "repairs" && <RepairsPage filter={route.filter} />}
+        {route.name === "repair" && <RepairDetailPage key={route.id} id={route.id} />}
+        {route.name === "customers" && <CustomersPage filter={route.filter} />}
+        {route.name === "customer" && <CustomerProfilePage key={route.id} id={route.id} />}
+        {route.name === "parts" && <PartsPage />}
+        {route.name === "chat" && (teamFeatures ? <ChatPage /> : <DashboardPage />)}
+        {route.name === "settings" && <SettingsPage />}
       </main>
     </div>
   );

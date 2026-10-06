@@ -12,8 +12,8 @@ export function passwordMatches(candidate, expected) {
   return timingSafeEqual(sha256(candidate), sha256(expected));
 }
 
-// Sessions are signed with a key derived from the login password, so changing
-// the password signs everybody out.
+// Sessions are signed with a key derived from the admin password (and the
+// optional SESSION_SECRET), so changing DBREPAIRS_PASSWORD signs everybody out.
 export function createSessionKey(password, secret = "") {
   return createHmac("sha256", "dbrepairs-session-v1").update(`${password}\0${secret}`).digest();
 }
@@ -22,21 +22,26 @@ function sign(key, payload) {
   return createHmac("sha256", key).update(payload).digest();
 }
 
-export function issueSession(key, now = Date.now()) {
-  const payload = `${now + SESSION_SECONDS * 1000}.${randomBytes(16).toString("base64url")}`;
+// Token: userId.sessionVersion.expiresAt.nonce.signature
+export function issueSession(key, { userId, version }, now = Date.now()) {
+  const payload = `${userId}.${version}.${now + SESSION_SECONDS * 1000}.${randomBytes(16).toString("base64url")}`;
   return { token: `${payload}.${sign(key, payload).toString("base64url")}`, maxAge: SESSION_SECONDS };
 }
 
+/** Returns the signed-in user id and session version, or null for a bad or expired token. */
 export function verifySession(key, token, now = Date.now()) {
-  if (typeof token !== "string") return false;
+  if (typeof token !== "string") return null;
   const parts = token.split(".");
-  if (parts.length !== 3) return false;
-  const [expires, nonce, signature] = parts;
-  const expected = sign(key, `${expires}.${nonce}`);
+  if (parts.length !== 5) return null;
+  const [userId, version, expires, nonce, signature] = parts;
+  const expected = sign(key, `${userId}.${version}.${expires}.${nonce}`);
   const given = Buffer.from(signature, "base64url");
-  if (given.length !== expected.length || !timingSafeEqual(given, expected)) return false;
+  if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
   const expiresAt = Number(expires);
-  return Number.isSafeInteger(expiresAt) && expiresAt > now;
+  const id = Number(userId);
+  const sessionVersion = Number(version);
+  if (!Number.isSafeInteger(expiresAt) || expiresAt <= now || !Number.isSafeInteger(id) || id < 1 || !Number.isSafeInteger(sessionVersion)) return null;
+  return { userId: id, version: sessionVersion };
 }
 
 export function readCookie(header, name) {

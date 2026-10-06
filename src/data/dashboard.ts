@@ -1,85 +1,36 @@
 import { getDatabase } from "./database";
 import { api } from "./api";
 import { isServerMode } from "./runtime";
+import { desktopRepairSelect, Repair } from "./repairs";
 
 export type DashboardStats = {
   openRepairs: number;
   waitingCustomer: number;
   ready: number;
   closedToday: number;
+  overdue: number;
+  partsToOrder: number;
 };
 
-export type DashboardRecentRepair = {
-  id: number;
-  repair_number: string;
-  customer_name: string;
-  status_code: string;
-  status_label_key: string;
-  device_type: string | null;
-  brand: string | null;
-  model: string | null;
-  opened_at: string;
-};
+export type DashboardData = { stats: DashboardStats; recent: Repair[] };
 
-type DashboardData = { stats: DashboardStats; recent: DashboardRecentRepair[] };
-let serverDashboardRequest: Promise<DashboardData> | undefined;
+export const emptyStats: DashboardStats = { openRepairs: 0, waitingCustomer: 0, ready: 0, closedToday: 0, overdue: 0, partsToOrder: 0 };
 
-function getServerDashboard() {
-  if (!serverDashboardRequest) {
-    serverDashboardRequest = api<DashboardData>("/dashboard");
-    window.setTimeout(() => { serverDashboardRequest = undefined; }, 0);
+export async function getDashboard(): Promise<DashboardData> {
+  if (isServerMode) {
+    const data = await api<DashboardData>("/dashboard");
+    return { stats: { ...emptyStats, ...data.stats }, recent: data.recent.map((r) => ({ ...r, paid: Boolean(r.paid) })) };
   }
-  return serverDashboardRequest;
-}
-
-type CountRow = { count: number };
-
-async function count(sql: string, params: unknown[] = []): Promise<number> {
   const db = await getDatabase();
-  const rows = await db.select<CountRow[]>(sql, params);
-  return Number(rows[0]?.count ?? 0);
-}
-
-export async function getDashboardStats(): Promise<DashboardStats> {
-  if (isServerMode) return (await getServerDashboard()).stats;
-  const [openRepairs, waitingCustomer, ready, closedToday] = await Promise.all([
-    count(`SELECT COUNT(*) count
-      FROM repairs r
-      JOIN repair_statuses s ON s.id=r.status_id
-      WHERE s.code NOT IN ('DELIVERED','CANCELLED')`),
-    count(`SELECT COUNT(*) count
-      FROM repairs r
-      JOIN repair_statuses s ON s.id=r.status_id
-      WHERE s.code='WAITING_CUSTOMER'`),
-    count(`SELECT COUNT(*) count
-      FROM repairs r
-      JOIN repair_statuses s ON s.id=r.status_id
-      WHERE s.code='READY'`),
-    count(`SELECT COUNT(*) count
-      FROM repairs
-      WHERE closed_at IS NOT NULL
-        AND date(closed_at,'localtime') = date('now','localtime')`),
-  ]);
-
-  return { openRepairs, waitingCustomer, ready, closedToday };
-}
-
-export async function listDashboardRecentRepairs(limit = 5): Promise<DashboardRecentRepair[]> {
-  if (isServerMode) return (await getServerDashboard()).recent.slice(0, limit);
-  const db = await getDatabase();
-  return db.select(`SELECT
-      r.id,
-      r.repair_number,
-      c.name customer_name,
-      s.code status_code,
-      s.label_key status_label_key,
-      r.device_type,
-      r.brand,
-      r.model,
-      r.opened_at
-    FROM repairs r
-    JOIN customers c ON c.id=r.customer_id
-    JOIN repair_statuses s ON s.id=r.status_id
-    ORDER BY r.id DESC
-    LIMIT ?`, [limit]);
+  const [counts] = await db.select<Record<keyof DashboardStats, number>[]>(`SELECT
+    (SELECT COUNT(*) FROM repairs r JOIN repair_statuses s ON s.id=r.status_id WHERE s.code NOT IN ('DELIVERED','CANCELLED')) openRepairs,
+    (SELECT COUNT(*) FROM repairs r JOIN repair_statuses s ON s.id=r.status_id WHERE s.code='WAITING_CUSTOMER') waitingCustomer,
+    (SELECT COUNT(*) FROM repairs r JOIN repair_statuses s ON s.id=r.status_id WHERE s.code='READY') ready,
+    (SELECT COUNT(*) FROM repairs WHERE closed_at IS NOT NULL AND date(closed_at,'localtime') = date('now','localtime')) closedToday,
+    (SELECT COUNT(*) FROM repairs r JOIN repair_statuses s ON s.id=r.status_id
+      WHERE s.code NOT IN ('DELIVERED','CANCELLED') AND r.due_date IS NOT NULL AND r.due_date < date('now','localtime')) overdue,
+    (SELECT COUNT(*) FROM repair_parts WHERE status='needed') partsToOrder`);
+  const recent = await db.select<Repair[]>(`${desktopRepairSelect} ORDER BY r.id DESC LIMIT 8`);
+  const stats = Object.fromEntries(Object.entries(counts ?? emptyStats).map(([key, value]) => [key, Number(value)])) as DashboardStats;
+  return { stats, recent: recent.map((r) => ({ ...r, paid: Boolean(r.paid), parts_pending: Number(r.parts_pending) })) };
 }

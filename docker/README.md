@@ -15,16 +15,24 @@ The server edition uses the existing React interface with a central API and Post
    docker compose up -d --build
    ```
 
-4. Open `http://SERVER-IP:8080` from the counter and office computers and sign in with `DBREPAIRS_PASSWORD`.
+4. Open `http://SERVER-IP:8080` from the counter and office computers and sign in with the username `admin` and the `DBREPAIRS_PASSWORD` password.
+5. Open **Settings → Team** and add an account for each technician.
 
 Only the web port is published. PostgreSQL and the API remain on the private Docker network.
 
 ### Security model
 
-- Everyone signs in with one shared shop password (`DBREPAIRS_PASSWORD`). Sessions last 30 days. Changing the password signs everybody out.
-- After 10 wrong passwords from one address, sign-in from that address is blocked for 15 minutes.
+- Everyone signs in with their own username and password. The built-in `admin` account uses `DBREPAIRS_PASSWORD`; admins add technicians in **Settings → Team**.
+- Admins can change settings, manage the team and create or restore backups. Techs work on repairs, customers, parts and the team chat.
+- Passwords are stored as salted scrypt hashes. Sessions last 30 days. Changing someone's password or disabling their account signs them out immediately; changing `DBREPAIRS_PASSWORD` signs everybody out.
+- After 10 wrong passwords for one account, sign-in to that account is blocked for 15 minutes.
+- Team chat attachments (up to 15 MB each) are stored in PostgreSQL, so the normal backups include them. Only images open in the browser; every other file is downloaded.
 - The application connects to PostgreSQL as a restricted account (`APP_DB_USER`, default `dbrepairs_app`). It is not a superuser, so a crafted backup file cannot run commands on the server.
 - The connection is plain HTTP. Keep DBRepairs on the shop network. For remote access use a VPN, or a reverse proxy that adds HTTPS.
+
+### Upgrading from 0.3
+
+Sign in with the username `admin` and your existing `DBREPAIRS_PASSWORD`. Nothing else changes in `.env`.
 
 ### Upgrading from 0.2
 

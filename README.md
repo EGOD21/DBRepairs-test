@@ -8,14 +8,19 @@ The project is a clean rewrite with a shared React/TypeScript interface. It can 
 
 ### Customers
 
-- Create, edit, search and delete customers.
-- Name, company, tax number, phone, email, address and notes.
+- Full customer profiles: residential or commercial, contact person, phone, mobile, email, address, tags and notes.
+- Retainer clients with plan, monthly fee and renewal date.
+- Profile page with repair history, open repairs, total billed and last visit.
+- One-click email (mailto), call and text links.
 - View the complete repair history directly from the customer record.
 - Create a new customer directly while opening a repair.
 
 ### Repairs
 
-- Create and edit repair jobs.
+- Create, edit and delete repair jobs.
+- Priority, promised date (with overdue tracking), technician, deposit, paid flag and warranty.
+- Parts to order per repair: part, part number, supplier, order link, quantity, cost and status (to order → ordered → received → installed).
+- Email templates for the customer: received, estimate approval, waiting for parts, ready for pickup and thank you.
 - Repair number generated automatically.
 - Device type, brand, model, serial number and IMEI.
 - Reported fault, accessories and general condition.
@@ -43,6 +48,9 @@ Every status change is stored with date and time. An optional note can be added 
 
 ### Printing
 
+- Three ticket types: A4 intake sheet, device label with barcode (62×29 mm, 89×36 mm, 4×2 in or 4×6 in) and 80 mm customer receipt.
+- Optional automatic printing right after a repair is created.
+- Scanning a label's barcode in the repairs search opens that repair.
 - A4 portrait repair intake sheet.
 - Two copies on the same page:
   - workshop copy;
@@ -64,6 +72,8 @@ Live overview with:
 ### Settings and data
 
 - Global application language.
+- Appearance: every color, the fonts and the corner roundness can be changed, with presets (HubSpot-style default, Neutral, Dark, Ocean).
+- Company logo shown in the sidebar, the browser tab, the sign-in page and on every ticket.
 - Portuguese (Portugal), English, Spanish and French.
 - Company name, tax number, address, phone, email and logo.
 - Manual SQLite database backup.
@@ -73,7 +83,8 @@ Live overview with:
 ### Server edition
 
 - One central PostgreSQL database for simultaneous use from multiple computers.
-- Sign-in with a shared shop password.
+- Personal sign-ins for every team member, with admin and tech roles.
+- Team chat: one shared channel with tags, open-question tracking, file attachments and clickable links and repair numbers.
 - Browser interface reusing the desktop workflow and translations.
 - Transactional HTTP API and automatic schema migrations.
 - Docker Compose stack for a server or Portainer.
@@ -98,7 +109,7 @@ Live overview with:
 Download the `.deb` package and install it with:
 
 ```bash
-sudo apt install ./DBRepairs_0.3.0_amd64.deb
+sudo apt install ./DBRepairs_0.4.0_amd64.deb
 ```
 
 ### Fedora / RHEL compatible distributions
@@ -106,7 +117,7 @@ sudo apt install ./DBRepairs_0.3.0_amd64.deb
 Download the `.rpm` package and install it with your distribution package manager, for example:
 
 ```bash
-sudo dnf install ./DBRepairs-0.3.0-1.x86_64.rpm
+sudo dnf install ./DBRepairs-0.4.0-1.x86_64.rpm
 ```
 
 ## Development

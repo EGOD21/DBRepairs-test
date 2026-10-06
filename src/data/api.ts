@@ -26,28 +26,42 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export async function getSession(): Promise<boolean> {
+export type SessionUser = { id: number; username: string; displayName: string; role: "admin" | "tech"; active: boolean };
+
+export async function getSession(): Promise<SessionUser | null> {
   const response = await fetch(`${apiRoot}/session`);
   if (!response.ok) throw new Error(await responseError(response));
-  return (await response.json() as { authenticated: boolean }).authenticated;
+  const body = await response.json() as { authenticated: boolean; user?: SessionUser };
+  return body.authenticated && body.user ? body.user : null;
 }
 
-export type LoginResult = "ok" | "invalid" | "throttled";
+export type LoginResult = { status: "ok"; user: SessionUser } | { status: "invalid" | "throttled" };
 
-export async function login(password: string): Promise<LoginResult> {
+export async function login(username: string, password: string): Promise<LoginResult> {
   const response = await fetch(`${apiRoot}/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ password }),
+    body: JSON.stringify({ username, password }),
   });
-  if (response.ok) return "ok";
-  if (response.status === 401) return "invalid";
-  if (response.status === 429) return "throttled";
+  if (response.ok) return { status: "ok", user: (await response.json() as { user: SessionUser }).user };
+  if (response.status === 401) return { status: "invalid" };
+  if (response.status === 429) return { status: "throttled" };
   throw new Error(await responseError(response));
 }
 
 export async function logout(): Promise<void> {
   await fetch(`${apiRoot}/logout`, { method: "POST" });
+}
+
+/** Sends a file as the raw request body (no extra libraries needed). */
+export async function uploadFile<T>(path: string, file: File): Promise<T> {
+  const response = await fetch(`${apiRoot}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/octet-stream", "X-Filename": encodeURIComponent(file.name), "X-Content-Type": file.type || "application/octet-stream" },
+    body: file,
+  });
+  await ensureOk(response);
+  return response.json() as Promise<T>;
 }
 
 export async function downloadApiFile(path: string): Promise<string> {

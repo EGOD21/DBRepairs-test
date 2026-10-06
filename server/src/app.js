@@ -1,15 +1,42 @@
 import Fastify from "fastify";
 import { createPostgresBackup, isPostgresBackup, restorePostgresBackup } from "./backup.js";
-import { customerInput, officeSettingsInput, pathId, repairInput, ValidationError } from "./validation.js";
+import { customerInput, partInput, pathId, repairInput, SETTING_LIMITS, settingsInput, ValidationError } from "./validation.js";
 import { exportPortableBackup, importPortableBackup, PortableBackupError } from "./portable.js";
-import { createLoginLimiter, issueSession, passwordMatches, readCookie, SESSION_COOKIE, sessionCookie, verifySession } from "./auth.js";
+import { createLoginLimiter, issueSession, readCookie, SESSION_COOKIE, sessionCookie, verifySession } from "./auth.js";
+import { ADMIN_USERNAME, findUserById, findUserByUsername, hashPassword, listUsers, newPassword, publicUser, userInput, verifyPassword } from "./users.js";
+import { registerChatRoutes } from "./chat.js";
 
-const repairSelect = `SELECT r.*, c.name customer_name, s.code status_code, s.label_key status_label_key
+const repairSelect = `SELECT r.*, c.name customer_name, c.email customer_email, c.phone customer_phone, c.mobile customer_mobile,
+    c.company customer_company, s.code status_code, s.label_key status_label_key,
+    (SELECT COUNT(*) FROM repair_parts p WHERE p.repair_id = r.id AND p.status IN ('needed','ordered'))::integer parts_pending
   FROM repairs r
   JOIN customers c ON c.id = r.customer_id
   JOIN repair_statuses s ON s.id = r.status_id`;
 
-const publicPaths = new Set(["/api/health", "/api/session", "/api/login", "/api/logout"]);
+// Customer columns plus repair statistics for lists and profiles.
+const customerSelect = `SELECT c.id, c.name, c.company, c.tax_number, c.phone, c.mobile, c.email, c.address, c.notes,
+    c.customer_type, c.contact_person, c.preferred_contact, c.tags, c.is_retainer, c.retainer_plan,
+    c.retainer_monthly_fee, c.retainer_renewal_date, c.created_at, c.updated_at,
+    COALESCE(st.repair_count, 0)::integer repair_count, COALESCE(st.open_repairs, 0)::integer open_repairs,
+    COALESCE(st.total_billed, 0)::double precision total_billed, st.last_repair_at
+  FROM customers c
+  LEFT JOIN (
+    SELECT r.customer_id, COUNT(*) repair_count,
+      COUNT(*) FILTER (WHERE s.code NOT IN ('DELIVERED','CANCELLED')) open_repairs,
+      SUM(COALESCE(r.final_value, 0)) total_billed, MAX(r.opened_at) last_repair_at
+    FROM repairs r JOIN repair_statuses s ON s.id = r.status_id GROUP BY r.customer_id
+  ) st ON st.customer_id = c.id`;
+
+const partSelect = `SELECT p.*, r.repair_number, r.customer_id, c.name customer_name, r.device_type, r.brand, r.model
+  FROM repair_parts p
+  JOIN repairs r ON r.id = p.repair_id
+  JOIN customers c ON c.id = r.customer_id`;
+
+const customerColumns = "name, company, tax_number, phone, mobile, email, address, notes, customer_type, contact_person, preferred_contact, tags, is_retainer, retainer_plan, retainer_monthly_fee, retainer_renewal_date";
+const customerValues = (c) => [c.name, c.company, c.taxNumber, c.phone, c.mobile, c.email, c.address, c.notes, c.customerType, c.contactPerson,
+  c.preferredContact, c.tags, c.isRetainer, c.retainerPlan, c.retainerMonthlyFee, c.retainerRenewalDate];
+
+const publicPaths = new Set(["/api/health", "/api/session", "/api/login", "/api/logout", "/api/branding"]);
 
 function replyNotFound(reply) {
   return reply.code(404).send({ error: "Not found" });
@@ -24,7 +51,18 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
   });
 
   const loginLimiter = createLoginLimiter();
-  const isAuthenticated = (request) => verifySession(config.auth.sessionKey, readCookie(request.headers.cookie, SESSION_COOKIE));
+  app.decorateRequest("user", null);
+
+  async function currentUser(request) {
+    const session = verifySession(config.auth.sessionKey, readCookie(request.headers.cookie, SESSION_COOKIE));
+    if (!session) return null;
+    const user = await findUserById(pool, session.userId);
+    return user && user.active && user.session_version === session.version ? user : null;
+  }
+
+  const requireAdmin = (request) => {
+    if (request.user?.role !== "admin") throw Object.assign(new Error("Only an admin can do this"), { statusCode: 403 });
+  };
 
   app.addHook("onRequest", async (request, reply) => {
     const path = request.url.split("?")[0];
@@ -35,9 +73,9 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
     if (restoring && path !== "/api/health") {
       return reply.code(503).send({ error: "Database restore in progress" });
     }
-    if (!publicPaths.has(path) && !isAuthenticated(request)) {
-      return reply.code(401).send({ error: "Authentication required" });
-    }
+    if (publicPaths.has(path)) return;
+    request.user = await currentUser(request);
+    if (!request.user) return reply.code(401).send({ error: "Authentication required" });
   });
 
   app.addHook("onSend", async (_request, reply, payload) => {
@@ -64,51 +102,109 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
     return { status: "ok" };
   });
 
-  app.get("/api/session", async (request) => ({ authenticated: isAuthenticated(request) }));
+  app.get("/api/session", async (request) => {
+    const user = await currentUser(request);
+    return user ? { authenticated: true, user: publicUser(user) } : { authenticated: false };
+  });
 
   app.post("/api/login", async (request, reply) => {
-    const ip = request.ip;
-    if (loginLimiter.blocked(ip)) return reply.code(429).send({ error: "Too many failed attempts. Try again later" });
-    if (!passwordMatches(request.body?.password, config.auth.password)) {
-      loginLimiter.fail(ip);
-      return reply.code(401).send({ error: "Wrong password" });
+    const username = typeof request.body?.username === "string" && request.body.username.trim() ? request.body.username.trim() : ADMIN_USERNAME;
+    // Throttle per account as well as per address: behind Tailscale Serve every
+    // request arrives from the same local address.
+    const limiterKey = `${request.ip}|${username.toLowerCase()}`;
+    if (loginLimiter.blocked(limiterKey)) return reply.code(429).send({ error: "Too many failed attempts. Try again later" });
+    const user = await findUserByUsername(pool, username);
+    if (!user || !user.active || !(await verifyPassword(request.body?.password, user.password_hash))) {
+      loginLimiter.fail(limiterKey);
+      return reply.code(401).send({ error: "Wrong username or password" });
     }
-    loginLimiter.reset(ip);
-    const { token, maxAge } = issueSession(config.auth.sessionKey);
-    return reply.header("Set-Cookie", sessionCookie(token, { maxAge, secure: request.protocol === "https" })).code(204).send();
+    loginLimiter.reset(limiterKey);
+    const { token, maxAge } = issueSession(config.auth.sessionKey, { userId: user.id, version: user.session_version });
+    return reply.header("Set-Cookie", sessionCookie(token, { maxAge, secure: request.protocol === "https" })).code(200).send({ user: publicUser(user) });
   });
 
   app.post("/api/logout", async (request, reply) =>
     reply.header("Set-Cookie", sessionCookie("", { maxAge: 0, secure: request.protocol === "https" })).code(204).send());
 
+  app.get("/api/users", async (request) => { requireAdmin(request); return listUsers(pool); });
+
+  app.post("/api/users", async (request, reply) => {
+    requireAdmin(request);
+    const input = userInput(request.body, { creating: true });
+    if (await findUserByUsername(pool, input.username)) return reply.code(409).send({ error: "That username is already taken" });
+    const result = await pool.query(`INSERT INTO users (username, display_name, password_hash, role, active) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+      [input.username, input.displayName, await hashPassword(input.password), input.role, input.active]);
+    return reply.code(201).send({ id: result.rows[0].id });
+  });
+
+  app.put("/api/users/:id", async (request, reply) => {
+    requireAdmin(request);
+    const id = pathId(request.params.id);
+    const input = userInput(request.body, { creating: false });
+    const existing = await findUserById(pool, id);
+    if (!existing) return replyNotFound(reply);
+    // The built-in admin and your own account stay active admins so nobody is locked out.
+    if ((existing.username === ADMIN_USERNAME || id === request.user.id) && (input.role !== "admin" || !input.active)) {
+      return reply.code(400).send({ error: "You cannot disable or demote this account" });
+    }
+    if (existing.username === ADMIN_USERNAME && input.password) {
+      return reply.code(400).send({ error: "The admin password is set with DBREPAIRS_PASSWORD on the server" });
+    }
+    const endSessions = Boolean(input.password) || !input.active || input.role !== existing.role;
+    await pool.query(`UPDATE users SET display_name=$1, role=$2, active=$3, password_hash=COALESCE($4, password_hash),
+      session_version=session_version + $5, updated_at=now() WHERE id=$6`,
+      [input.displayName, input.role, input.active, input.password ? await hashPassword(input.password) : null, endSessions ? 1 : 0, id]);
+    return reply.code(204).send();
+  });
+
+  app.put("/api/me/password", async (request, reply) => {
+    if (request.user.username === ADMIN_USERNAME) return reply.code(400).send({ error: "The admin password is set with DBREPAIRS_PASSWORD on the server" });
+    const user = await findUserByUsername(pool, request.user.username);
+    if (!(await verifyPassword(request.body?.currentPassword, user.password_hash))) return reply.code(400).send({ error: "The current password is wrong" });
+    const password = newPassword(request.body?.newPassword);
+    const result = await pool.query("UPDATE users SET password_hash=$1, session_version=session_version+1, updated_at=now() WHERE id=$2 RETURNING session_version",
+      [await hashPassword(password), user.id]);
+    // Keep this browser signed in; other devices are signed out.
+    const { token, maxAge } = issueSession(config.auth.sessionKey, { userId: user.id, version: result.rows[0].session_version });
+    return reply.header("Set-Cookie", sessionCookie(token, { maxAge, secure: request.protocol === "https" })).code(204).send();
+  });
+
+  registerChatRoutes(app, pool, requireAdmin);
+
   app.get("/api/customers", async (request) => {
     const search = typeof request.query?.search === "string" ? request.query.search.trim() : "";
     const term = `%${search}%`;
-    return (await pool.query(`SELECT id, name, company, tax_number, phone, email, address, notes, created_at, updated_at
-      FROM customers
+    return (await pool.query(`${customerSelect}
       WHERE $1 = '%%'
-         OR name ILIKE $1
-         OR COALESCE(company, '') ILIKE $1
-         OR COALESCE(tax_number, '') ILIKE $1
-         OR COALESCE(phone, '') ILIKE $1
-         OR COALESCE(email, '') ILIKE $1
-      ORDER BY lower(name), id`, [term])).rows;
+         OR c.name ILIKE $1
+         OR COALESCE(c.company, '') ILIKE $1
+         OR COALESCE(c.contact_person, '') ILIKE $1
+         OR COALESCE(c.tax_number, '') ILIKE $1
+         OR COALESCE(c.phone, '') ILIKE $1
+         OR COALESCE(c.mobile, '') ILIKE $1
+         OR COALESCE(c.email, '') ILIKE $1
+         OR COALESCE(c.tags, '') ILIKE $1
+      ORDER BY lower(c.name), c.id`, [term])).rows;
+  });
+
+  app.get("/api/customers/:id", async (request, reply) => {
+    const result = await pool.query(`${customerSelect} WHERE c.id=$1`, [pathId(request.params.id)]);
+    if (!result.rowCount) return replyNotFound(reply);
+    return result.rows[0];
   });
 
   app.post("/api/customers", async (request, reply) => {
     const input = customerInput(request.body);
-    const result = await pool.query(`INSERT INTO customers (name, company, tax_number, phone, email, address, notes)
-      VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-      [input.name, input.company, input.taxNumber, input.phone, input.email, input.address, input.notes]);
+    const result = await pool.query(`INSERT INTO customers (${customerColumns})
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`, customerValues(input));
     return reply.code(201).send({ id: result.rows[0].id });
   });
 
   app.put("/api/customers/:id", async (request, reply) => {
     const id = pathId(request.params.id);
     const input = customerInput(request.body);
-    const result = await pool.query(`UPDATE customers SET name=$1, company=$2, tax_number=$3, phone=$4, email=$5,
-      address=$6, notes=$7, updated_at=now() WHERE id=$8`,
-      [input.name, input.company, input.taxNumber, input.phone, input.email, input.address, input.notes, id]);
+    const result = await pool.query(`UPDATE customers SET (${customerColumns}, updated_at) =
+      ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16, now()) WHERE id=$17`, [...customerValues(input), id]);
     if (!result.rowCount) return replyNotFound(reply);
     return reply.code(204).send();
   });
@@ -141,17 +237,19 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
       FROM repair_status_history h JOIN repair_statuses s ON s.id=h.status_id
       WHERE h.repair_id=$1 ORDER BY h.id DESC`, [pathId(request.params.id)])).rows);
 
+  const repairColumns = "customer_id,status_id,device_type,brand,model,serial_number,imei,reported_fault,accessories,general_condition,estimated_value,internal_notes,priority,due_date,technician,deposit,paid,warranty_days";
+  const repairValues = (r) => [r.customer_id, r.status_id, r.device_type, r.brand, r.model, r.serial_number, r.imei, r.reported_fault,
+    r.accessories, r.general_condition, r.estimated_value, r.internal_notes, r.priority, r.due_date, r.technician, r.deposit, r.paid, r.warranty_days];
+
   app.post("/api/repairs", async (request, reply) => {
     const input = repairInput(request.body);
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
       const temporary = `TMP-${crypto.randomUUID()}`;
-      const result = await client.query(`INSERT INTO repairs
-        (repair_number,customer_id,status_id,device_type,brand,model,serial_number,imei,reported_fault,accessories,general_condition,estimated_value,internal_notes)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id, EXTRACT(YEAR FROM opened_at)::integer opened_year`,
-        [temporary,input.customer_id,input.status_id,input.device_type,input.brand,input.model,input.serial_number,input.imei,input.reported_fault,
-          input.accessories,input.general_condition,input.estimated_value,input.internal_notes]);
+      const result = await client.query(`INSERT INTO repairs (repair_number,${repairColumns})
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+        RETURNING id, EXTRACT(YEAR FROM opened_at)::integer opened_year`, [temporary, ...repairValues(input)]);
       const { id, opened_year: openedYear } = result.rows[0];
       const repairNumber = `${openedYear}-${String(id).padStart(6, "0")}`;
       await client.query("UPDATE repairs SET repair_number=$1 WHERE id=$2", [repairNumber, id]);
@@ -177,13 +275,10 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
         await client.query("ROLLBACK");
         return replyNotFound(reply);
       }
-      await client.query(`UPDATE repairs SET customer_id=$1, status_id=$2, device_type=$3, brand=$4, model=$5, serial_number=$6,
-        imei=$7, reported_fault=$8, accessories=$9, general_condition=$10, diagnosis=$11, work_performed=$12, estimated_value=$13,
-        final_value=$14, internal_notes=$15, updated_at=now(), closed_at=CASE
-          WHEN (SELECT code FROM repair_statuses WHERE id=$2) IN ('DELIVERED','CANCELLED') THEN COALESCE(closed_at,now()) ELSE NULL END
-        WHERE id=$16`, [input.customer_id,input.status_id,input.device_type,input.brand,input.model,input.serial_number,input.imei,
-          input.reported_fault,input.accessories,input.general_condition,input.diagnosis,input.work_performed,input.estimated_value,
-          input.final_value,input.internal_notes,id]);
+      await client.query(`UPDATE repairs SET (${repairColumns},diagnosis,work_performed,final_value,updated_at) =
+        ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,now()),
+        closed_at=CASE WHEN (SELECT code FROM repair_statuses WHERE id=$2) IN ('DELIVERED','CANCELLED') THEN COALESCE(closed_at,now()) ELSE NULL END
+        WHERE id=$22`, [...repairValues(input), input.diagnosis, input.work_performed, input.final_value, id]);
       if (current.rows[0].status_id !== input.status_id) {
         await client.query("INSERT INTO repair_status_history (repair_id,status_id,note) VALUES ($1,$2,$3)", [id,input.status_id,input.statusNote]);
       }
@@ -197,41 +292,94 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
     }
   });
 
+  // Status history and parts are removed with the repair (ON DELETE CASCADE).
+  app.delete("/api/repairs/:id", async (request, reply) => {
+    const result = await pool.query("DELETE FROM repairs WHERE id=$1", [pathId(request.params.id)]);
+    if (!result.rowCount) return replyNotFound(reply);
+    return reply.code(204).send();
+  });
+
+  app.get("/api/parts", async (request) => {
+    const status = request.query?.status;
+    const filters = { open: "p.status IN ('needed','ordered')", needed: "p.status='needed'", ordered: "p.status='ordered'", all: "true" };
+    const where = filters[status] ?? filters.open;
+    return (await pool.query(`${partSelect} WHERE ${where} ORDER BY CASE p.status WHEN 'needed' THEN 0 WHEN 'ordered' THEN 1 ELSE 2 END, p.id DESC`)).rows;
+  });
+
+  app.get("/api/repairs/:id/parts", async (request) =>
+    (await pool.query(`${partSelect} WHERE p.repair_id=$1 ORDER BY p.id`, [pathId(request.params.id)])).rows);
+
+  const partColumns = "name,part_number,supplier,url,quantity,unit_cost,status,notes";
+  const partValues = (p) => [p.name, p.part_number, p.supplier, p.url, p.quantity, p.unit_cost, p.status, p.notes];
+
+  app.post("/api/repairs/:id/parts", async (request, reply) => {
+    const repairId = pathId(request.params.id);
+    const input = partInput(request.body);
+    const result = await pool.query(`INSERT INTO repair_parts (repair_id,${partColumns},ordered_at,received_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,
+        CASE WHEN $8 IN ('ordered','received','installed') THEN now() END,
+        CASE WHEN $8 IN ('received','installed') THEN now() END) RETURNING id`, [repairId, ...partValues(input)]);
+    return reply.code(201).send({ id: result.rows[0].id });
+  });
+
+  app.put("/api/parts/:id", async (request, reply) => {
+    const input = partInput(request.body);
+    const result = await pool.query(`UPDATE repair_parts SET (${partColumns},updated_at) = ($1,$2,$3,$4,$5,$6,$7,$8,now()),
+      ordered_at = CASE WHEN $7 IN ('ordered','received','installed') THEN COALESCE(ordered_at, now()) ELSE NULL END,
+      received_at = CASE WHEN $7 IN ('received','installed') THEN COALESCE(received_at, now()) ELSE NULL END
+      WHERE id=$9`, [...partValues(input), pathId(request.params.id)]);
+    if (!result.rowCount) return replyNotFound(reply);
+    return reply.code(204).send();
+  });
+
+  app.delete("/api/parts/:id", async (request, reply) => {
+    const result = await pool.query("DELETE FROM repair_parts WHERE id=$1", [pathId(request.params.id)]);
+    if (!result.rowCount) return replyNotFound(reply);
+    return reply.code(204).send();
+  });
+
   app.get("/api/dashboard", async () => {
     const [counts, recent] = await Promise.all([
       pool.query(`SELECT
-        COUNT(*) FILTER (WHERE s.code NOT IN ('DELIVERED','CANCELLED'))::integer open_repairs,
-        COUNT(*) FILTER (WHERE s.code='WAITING_CUSTOMER')::integer waiting_customer,
-        COUNT(*) FILTER (WHERE s.code='READY')::integer ready,
-        COUNT(*) FILTER (WHERE r.closed_at IS NOT NULL AND r.closed_at::date = CURRENT_DATE)::integer closed_today
-        FROM repairs r JOIN repair_statuses s ON s.id=r.status_id`),
-      pool.query(`SELECT r.id,r.repair_number,c.name customer_name,s.code status_code,s.label_key status_label_key,
-        r.device_type,r.brand,r.model,r.opened_at FROM repairs r JOIN customers c ON c.id=r.customer_id
-        JOIN repair_statuses s ON s.id=r.status_id ORDER BY r.id DESC LIMIT 5`),
+        (SELECT COUNT(*) FROM repairs r JOIN repair_statuses s ON s.id=r.status_id WHERE s.code NOT IN ('DELIVERED','CANCELLED'))::integer open_repairs,
+        (SELECT COUNT(*) FROM repairs r JOIN repair_statuses s ON s.id=r.status_id WHERE s.code='WAITING_CUSTOMER')::integer waiting_customer,
+        (SELECT COUNT(*) FROM repairs r JOIN repair_statuses s ON s.id=r.status_id WHERE s.code='READY')::integer ready,
+        (SELECT COUNT(*) FROM repairs r WHERE r.closed_at IS NOT NULL AND r.closed_at::date = CURRENT_DATE)::integer closed_today,
+        (SELECT COUNT(*) FROM repairs r JOIN repair_statuses s ON s.id=r.status_id
+          WHERE s.code NOT IN ('DELIVERED','CANCELLED') AND r.due_date < CURRENT_DATE)::integer overdue,
+        (SELECT COUNT(*) FROM repair_parts p WHERE p.status='needed')::integer parts_to_order`),
+      pool.query(`${repairSelect} ORDER BY r.id DESC LIMIT 8`),
     ]);
     const row = counts.rows[0];
-    return { stats: { openRepairs: row.open_repairs, waitingCustomer: row.waiting_customer, ready: row.ready, closedToday: row.closed_today }, recent: recent.rows };
+    return {
+      stats: { openRepairs: row.open_repairs, waitingCustomer: row.waiting_customer, ready: row.ready, closedToday: row.closed_today,
+        overdue: row.overdue, partsToOrder: row.parts_to_order },
+      recent: recent.rows,
+    };
   });
 
-  const settingKeys = {
-    companyName: "office.companyName", taxNumber: "office.taxNumber", address: "office.address",
-    phone: "office.phone", email: "office.email", logoDataUrl: "office.logoDataUrl",
-  };
+  const settingKeys = Object.keys(SETTING_LIMITS);
 
-  app.get("/api/settings/office", async () => {
-    const rows = (await pool.query("SELECT key,value FROM app_settings WHERE key=ANY($1)", [Object.values(settingKeys)])).rows;
+  async function readSettings(keys) {
+    const rows = (await pool.query("SELECT key,value FROM app_settings WHERE key=ANY($1)", [keys])).rows;
     const values = new Map(rows.map((row) => [row.key, row.value]));
-    return Object.fromEntries(Object.entries(settingKeys).map(([field, key]) => [field, values.get(key) || ""]));
-  });
+    return Object.fromEntries(keys.map((key) => [key, values.get(key) || ""]));
+  }
 
-  app.put("/api/settings/office", async (request, reply) => {
-    const settings = officeSettingsInput(request.body);
+  // Logo, name and colors are shown on the sign-in page, so they are public.
+  app.get("/api/branding", async () => readSettings(["office.companyName", "office.logoDataUrl", "ui.theme"]));
+
+  app.get("/api/settings", async () => readSettings(settingKeys));
+
+  app.put("/api/settings", async (request, reply) => {
+    requireAdmin(request);
+    const settings = settingsInput(request.body);
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
-      for (const [field, key] of Object.entries(settingKeys)) {
+      for (const [key, value] of Object.entries(settings)) {
         await client.query(`INSERT INTO app_settings (key,value) VALUES ($1,$2)
-          ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value`, [key, settings[field]]);
+          ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value`, [key, value]);
       }
       await client.query("COMMIT");
       return reply.code(204).send();
@@ -243,7 +391,8 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
     }
   });
 
-  app.get("/api/backups/database", async (_request, reply) => {
+  app.get("/api/backups/database", async (request, reply) => {
+    requireAdmin(request);
     const backup = await createPostgresBackup(config.database);
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     return reply
@@ -253,6 +402,7 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
   });
 
   app.put("/api/backups/database", { bodyLimit: 256 * 1024 * 1024 }, async (request, reply) => {
+    requireAdmin(request);
     if (!isPostgresBackup(request.body)) return reply.code(400).send({ error: "Invalid PostgreSQL backup" });
     if (restoring) return reply.code(409).send({ error: "Another restore is already in progress" });
     restoring = true;
@@ -265,7 +415,8 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
     }
   });
 
-  app.get("/api/backups/portable", async (_request, reply) => {
+  app.get("/api/backups/portable", async (request, reply) => {
+    requireAdmin(request);
     const archive = await exportPortableBackup(pool);
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     return reply
@@ -275,6 +426,7 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
   });
 
   app.put("/api/backups/portable", { bodyLimit: 256 * 1024 * 1024 }, async (request, reply) => {
+    requireAdmin(request);
     if (restoring) return reply.code(409).send({ error: "Another restore is already in progress" });
     restoring = true;
     try {

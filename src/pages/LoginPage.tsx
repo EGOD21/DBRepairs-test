@@ -1,27 +1,31 @@
 import { FormEvent, useState } from "react";
 import LanguageDropdown from "../components/LanguageDropdown";
-import { login } from "../data/api";
+import { login, SessionUser } from "../data/api";
 import { useI18n } from "../i18n/I18nProvider";
+import { useBranding } from "../branding";
 
-export default function LoginPage({ onSignedIn }: { onSignedIn: () => void }) {
+export default function LoginPage({ onSignedIn }: { onSignedIn: (user: SessionUser) => void }) {
   const { t, locale, setLocale, locales } = useI18n();
+  const { companyName, logo } = useBranding();
+  const [username, setUsername] = useState(() => { try { return localStorage.getItem("dbrepairs.lastUsername") || ""; } catch { return ""; } });
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!password || busy) return;
+    if (!username.trim() || !password || busy) return;
     setBusy(true);
     setError("");
     try {
-      const result = await login(password);
-      if (result === "ok") {
+      const result = await login(username.trim(), password);
+      if (result.status === "ok") {
+        try { localStorage.setItem("dbrepairs.lastUsername", username.trim()); } catch { /* not remembered */ }
         setPassword("");
-        onSignedIn();
+        onSignedIn(result.user);
         return;
       }
-      setError(t(result === "throttled" ? "auth.throttled" : "auth.invalid"));
+      setError(t(result.status === "throttled" ? "auth.throttled" : "auth.invalid"));
     } catch (cause) {
       console.error(cause);
       setError(t("database.error"));
@@ -32,19 +36,19 @@ export default function LoginPage({ onSignedIn }: { onSignedIn: () => void }) {
 
   return (
     <div className="login-shell">
-      <form className="panel login-panel" onSubmit={(event) => void submit(event)}>
-        <div className="login-brand"><img src="/dbrepairs-icon.png" alt="" /><strong>DBRepairs</strong></div>
-        <h1>{t("auth.title")}</h1>
-        <p>{t("auth.subtitle")}</p>
-        {error && <div className="alert error login-alert" role="alert">{error}</div>}
+      <form className="login-card" onSubmit={(event) => void submit(event)}>
+        <div className="login-brand"><img src={logo} alt="" /><h1>{companyName}</h1></div>
+        {error && <div className="alert error" role="alert">{error}</div>}
+        <label className="field">
+          <span>{t("auth.username")}</span>
+          <input autoFocus={!username} autoComplete="username" autoCapitalize="none" spellCheck={false} value={username} onChange={(event) => setUsername(event.target.value)} />
+        </label>
         <label className="field">
           <span>{t("auth.password")}</span>
-          <input type="password" autoFocus autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} />
+          <input type="password" autoFocus={Boolean(username)} autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} />
         </label>
-        <button type="submit" className="primary" disabled={busy || !password}>{busy ? t("auth.signingIn") : t("auth.signIn")}</button>
-        <div className="login-language">
-          <LanguageDropdown locale={locale} setLocale={setLocale} locales={locales} label={t("settings.language")} searchLabel={t("settings.searchLanguage")} />
-        </div>
+        <button type="submit" className="btn btn-primary" disabled={busy || !password || !username.trim()}>{busy ? t("auth.signingIn") : t("auth.signIn")}</button>
+        <LanguageDropdown locale={locale} setLocale={setLocale} locales={locales} label={t("settings.language")} searchLabel={t("settings.searchLanguage")} />
       </form>
     </div>
   );
