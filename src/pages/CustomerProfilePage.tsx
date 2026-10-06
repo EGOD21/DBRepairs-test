@@ -98,16 +98,16 @@ export default function CustomerProfilePage({ id }: { id: number }) {
           <section className="card">
             <div className="card-header"><div><h2>{t("customers.repairsTitle")}</h2><p>{t("customers.repairsHint")}</p></div></div>
             {repairs.length === 0 ? <div className="empty">{t("customers.repairsEmpty")}</div> : (
-              <div className="table-wrap"><table>
+              <div className="table-wrap"><table className="responsive">
                 <thead><tr><th>{t("repair.number")}</th><th>{t("repair.device")}</th><th>{t("repair.status")}</th><th>{t("repair.dueDate")}</th><th>{t("repair.finalValue")}</th><th>{t("repair.openedAt")}</th></tr></thead>
                 <tbody>{repairs.map((r) => (
                   <tr key={r.id} className="clickable" onClick={() => navigate({ name: "repair", id: r.id })}>
-                    <td className="nowrap"><strong><a href={href({ name: "repair", id: r.id })}>{r.repair_number}</a></strong></td>
-                    <td>{deviceLabel(r)}</td>
-                    <td><div className="title-row"><StatusBadge code={r.status_code} labelKey={r.status_label_key} /><PriorityBadge priority={r.priority} quiet /></div></td>
-                    <td className="nowrap" style={isOverdue(r) ? { color: "var(--danger)", fontWeight: 600 } : undefined}>{formatPlainDate(r.due_date)}</td>
-                    <td className="nowrap">{formatMoney(r.final_value ?? r.estimated_value)}</td>
-                    <td className="nowrap muted">{formatDbDate(r.opened_at)}</td>
+                    <td data-label={t("repair.number")} className="cell-title nowrap"><strong><a href={href({ name: "repair", id: r.id })}>{r.repair_number}</a></strong></td>
+                    <td data-label={t("repair.device")}>{deviceLabel(r)}</td>
+                    <td data-label={t("repair.status")}><div className="title-row"><StatusBadge code={r.status_code} labelKey={r.status_label_key} /><PriorityBadge priority={r.priority} quiet /></div></td>
+                    <td data-label={t("repair.dueDate")} className="nowrap" style={isOverdue(r) ? { color: "var(--danger)", fontWeight: 600 } : undefined}>{formatPlainDate(r.due_date)}</td>
+                    <td data-label={t("repair.finalValue")} className="nowrap">{formatMoney(r.final_value ?? r.estimated_value)}</td>
+                    <td data-label={t("repair.openedAt")} className="nowrap muted">{formatDbDate(r.opened_at)}</td>
                   </tr>
                 ))}</tbody>
               </table></div>

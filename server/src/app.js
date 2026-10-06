@@ -37,6 +37,16 @@ const customerValues = (c) => [c.name, c.company, c.taxNumber, c.phone, c.mobile
   c.preferredContact, c.tags, c.isRetainer, c.retainerPlan, c.retainerMonthlyFee, c.retainerRenewalDate];
 
 const publicPaths = new Set(["/api/health", "/api/session", "/api/login", "/api/logout", "/api/branding"]);
+// The installable-app manifest and icons are fetched by the phone before anyone signs in.
+const isPublicPath = (path) => publicPaths.has(path) || path.startsWith("/api/app/");
+
+// Home-screen icon files: setting key, fallback image in /icons, size.
+const appIcons = {
+  "icon-192.png": { key: "app.icon192", fallback: "/icons/icon-192.png" },
+  "icon-512.png": { key: "app.icon512", fallback: "/icons/icon-512.png" },
+  "maskable-512.png": { key: "app.iconMaskable", fallback: "/icons/maskable-512.png" },
+  "apple-touch-icon.png": { key: "app.iconApple", fallback: "/icons/apple-touch-icon.png" },
+};
 
 function replyNotFound(reply) {
   return reply.code(404).send({ error: "Not found" });
@@ -73,7 +83,7 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
     if (restoring && path !== "/api/health") {
       return reply.code(503).send({ error: "Database restore in progress" });
     }
-    if (publicPaths.has(path)) return;
+    if (isPublicPath(path)) return;
     request.user = await currentUser(request);
     if (!request.user) return reply.code(401).send({ error: "Authentication required" });
   });
@@ -370,6 +380,46 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
   app.get("/api/branding", async () => readSettings(["office.companyName", "office.logoDataUrl", "ui.theme"]));
 
   app.get("/api/settings", async () => readSettings(settingKeys));
+
+  // Web app manifest: lets phones install DBRepairs with the shop's name, colors and logo.
+  app.get("/api/app/manifest.webmanifest", async (_request, reply) => {
+    const settings = await readSettings(["office.companyName", "ui.theme"]);
+    let theme = {};
+    try { theme = JSON.parse(settings["ui.theme"] || "{}"); } catch { /* default colors */ }
+    const color = (value, fallback) => (typeof value === "string" && /^#[0-9a-fA-F]{6}$/.test(value) ? value : fallback);
+    const name = settings["office.companyName"] || "DBRepairs";
+    return reply.header("Content-Type", "application/manifest+json").header("Cache-Control", "no-cache").send(JSON.stringify({
+      name,
+      short_name: name.length > 14 ? name.slice(0, 14).trim() : name,
+      description: "Repair shop manager",
+      id: "/",
+      start_url: "/",
+      scope: "/",
+      display: "standalone",
+      orientation: "any",
+      background_color: color(theme.background, "#f5f8fa"),
+      theme_color: color(theme.sidebar, "#2d3e50"),
+      icons: [
+        { src: "/api/app/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+        { src: "/api/app/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+        { src: "/api/app/maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+      ],
+      shortcuts: [
+        { name: "New repair", url: "/#/repairs?filter=new", icons: [{ src: "/api/app/icon-192.png", sizes: "192x192" }] },
+        { name: "Team chat", url: "/#/chat", icons: [{ src: "/api/app/icon-192.png", sizes: "192x192" }] },
+      ],
+    }));
+  });
+
+  // Serves the logo-based icon when one was made, otherwise the default DBRepairs icon.
+  app.get("/api/app/:file", async (request, reply) => {
+    const icon = appIcons[request.params.file];
+    if (!icon) return replyNotFound(reply);
+    const value = (await readSettings([icon.key]))[icon.key];
+    const match = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(value);
+    if (!match) return reply.redirect(icon.fallback, 302);
+    return reply.header("Content-Type", "image/png").header("Cache-Control", "no-cache").send(Buffer.from(match[1], "base64"));
+  });
 
   app.put("/api/settings", async (request, reply) => {
     requireAdmin(request);

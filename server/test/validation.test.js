@@ -49,3 +49,8 @@ test("settings accept known keys and safe values only", () => {
   assert.throws(() => settingsInput({ "ui.theme": '{"primary":"red;}body{display:none"}' }), ValidationError);
   assert.doesNotThrow(() => settingsInput({ "ui.theme": '{"primary":"#ff7a59","fontFamily":"\\"Inter\\", system-ui"}' }));
 });
+
+test("app icons must be PNG data URLs", () => {
+  assert.doesNotThrow(() => settingsInput({ "app.icon192": "data:image/png;base64,iVBORw0KGgo=" }));
+  assert.throws(() => settingsInput({ "app.icon192": "data:image/svg+xml;base64,PHN2Zz4=" }), ValidationError);
+});

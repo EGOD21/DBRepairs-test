@@ -50,16 +50,16 @@ export default function DashboardPage() {
       <section className="card">
         <div className="card-header"><div><h2>{t("dashboard.recent")}</h2></div><a href={href({ name: "repairs" })}>{t("dashboard.viewAll")}</a></div>
         {data.recent.length === 0 ? <div className="empty">{loading ? t("common.loading") : t("repairs.empty")}</div> : (
-          <div className="table-wrap"><table>
+          <div className="table-wrap"><table className="responsive">
             <thead><tr><th>{t("repair.number")}</th><th>{t("repair.customer")}</th><th>{t("repair.device")}</th><th>{t("repair.status")}</th><th>{t("repair.dueDate")}</th><th>{t("repair.openedAt")}</th></tr></thead>
             <tbody>{data.recent.map((repair) => (
               <tr key={repair.id} className="clickable" onClick={() => navigate({ name: "repair", id: repair.id })}>
-                <td><strong><a href={href({ name: "repair", id: repair.id })}>{repair.repair_number}</a></strong></td>
-                <td>{repair.customer_name}</td>
-                <td>{deviceLabel(repair)}</td>
-                <td><div className="title-row"><StatusBadge code={repair.status_code} labelKey={repair.status_label_key} /><PriorityBadge priority={repair.priority} quiet /></div></td>
-                <td className={isOverdue(repair) ? "nowrap" : "nowrap muted"} style={isOverdue(repair) ? { color: "var(--danger)", fontWeight: 600 } : undefined}>{formatPlainDate(repair.due_date)}</td>
-                <td className="nowrap muted">{formatDbDate(repair.opened_at)}</td>
+                <td data-label={t("repair.number")} className="cell-title"><strong><a href={href({ name: "repair", id: repair.id })}>{repair.repair_number}</a></strong></td>
+                <td data-label={t("repair.customer")}>{repair.customer_name}</td>
+                <td data-label={t("repair.device")}>{deviceLabel(repair)}</td>
+                <td data-label={t("repair.status")}><div className="title-row"><StatusBadge code={repair.status_code} labelKey={repair.status_label_key} /><PriorityBadge priority={repair.priority} quiet /></div></td>
+                <td data-label={t("repair.dueDate")} className={isOverdue(repair) ? "nowrap" : "nowrap muted"} style={isOverdue(repair) ? { color: "var(--danger)", fontWeight: 600 } : undefined}>{formatPlainDate(repair.due_date)}</td>
+                <td data-label={t("repair.openedAt")} className="nowrap muted">{formatDbDate(repair.opened_at)}</td>
               </tr>
             ))}</tbody>
           </table></div>

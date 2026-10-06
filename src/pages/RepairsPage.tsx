@@ -136,19 +136,19 @@ export default function RepairsPage({ filter }: { filter?: string }) {
         {loading ? <div className="empty">{t("common.loading")}</div> : filtered.length === 0 ? (
           <div className="empty"><strong>{repairs.length ? t("repairs.noResults") : t("repairs.empty")}</strong></div>
         ) : (
-          <div className="table-wrap"><table>
+          <div className="table-wrap"><table className="responsive">
             <thead><tr><th>{t("repair.number")}</th><th>{t("repair.customer")}</th><th>{t("repair.device")}</th><th>{t("repair.status")}</th><th>{t("repair.dueDate")}</th><th>{t("repair.technician")}</th><th>{t("repair.openedAt")}</th><th></th></tr></thead>
             <tbody>{filtered.map((r) => {
               const overdue = isOverdue(r);
               return (
                 <tr key={r.id} className="clickable" onClick={() => navigate({ name: "repair", id: r.id })}>
-                  <td className="nowrap"><strong><a href={href({ name: "repair", id: r.id })}>{r.repair_number}</a></strong></td>
-                  <td>{r.customer_name}{r.customer_company && <div className="muted" style={{ fontSize: 12 }}>{r.customer_company}</div>}</td>
-                  <td>{deviceLabel(r)}</td>
-                  <td><div className="title-row"><StatusBadge code={r.status_code} labelKey={r.status_label_key} /><PriorityBadge priority={r.priority} quiet />{r.parts_pending > 0 && <span className="badge warning" title={t("parts.pending")}><Icon name="package" size={12} />{r.parts_pending}</span>}</div></td>
-                  <td className="nowrap" style={overdue ? { color: "var(--danger)", fontWeight: 600 } : undefined}>{formatPlainDate(r.due_date)}</td>
-                  <td className="muted">{r.technician || "—"}</td>
-                  <td className="nowrap muted">{formatDbDate(r.opened_at)}</td>
+                  <td data-label={t("repair.number")} className="cell-title nowrap"><strong><a href={href({ name: "repair", id: r.id })}>{r.repair_number}</a></strong></td>
+                  <td data-label={t("repair.customer")}><div>{r.customer_name}{r.customer_company && <div className="muted" style={{ fontSize: 12 }}>{r.customer_company}</div>}</div></td>
+                  <td data-label={t("repair.device")}>{deviceLabel(r)}</td>
+                  <td data-label={t("repair.status")}><div className="title-row"><StatusBadge code={r.status_code} labelKey={r.status_label_key} /><PriorityBadge priority={r.priority} quiet />{r.parts_pending > 0 && <span className="badge warning" title={t("parts.pending")}><Icon name="package" size={12} />{r.parts_pending}</span>}</div></td>
+                  <td data-label={t("repair.dueDate")} className="nowrap" style={overdue ? { color: "var(--danger)", fontWeight: 600 } : undefined}>{formatPlainDate(r.due_date)}</td>
+                  <td data-label={t("repair.technician")} className="muted">{r.technician || "—"}</td>
+                  <td data-label={t("repair.openedAt")} className="nowrap muted">{formatDbDate(r.opened_at)}</td>
                   <td className="actions" onClick={(e) => e.stopPropagation()}>
                     <div className="row-actions">
                       <a className="btn btn-sm" href={href({ name: "repair", id: r.id })}>{t("repair.open")}</a>

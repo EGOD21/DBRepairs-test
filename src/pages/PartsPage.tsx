@@ -55,18 +55,18 @@ export default function PartsPage() {
           <span className="count">{fill(t("parts.count"), { count: parts.length })}</span>
         </div>
         {loading ? <div className="empty">{t("common.loading")}</div> : parts.length === 0 ? <div className="empty"><strong>{t("parts.empty")}</strong><span>{t("parts.emptyHint")}</span></div> : (
-          <div className="table-wrap"><table>
+          <div className="table-wrap"><table className="responsive">
             <thead><tr><th>{t("part.name")}</th><th>{t("part.quantity")}</th><th>{t("part.unitCost")}</th><th>{t("part.supplier")}</th><th>{t("repair.number")}</th><th>{t("part.status")}</th><th></th></tr></thead>
             <tbody>{parts.map((part) => {
               const link = safeLink(part.url);
               return (
                 <tr key={part.id}>
-                  <td><strong>{part.name}</strong>{part.part_number && <div className="muted" style={{ fontSize: 12 }}>#{part.part_number}</div>}</td>
-                  <td>{part.quantity}</td>
-                  <td className="nowrap">{formatMoney(part.unit_cost)}</td>
-                  <td>{part.supplier || "—"}{part.ordered_at && <div className="muted" style={{ fontSize: 12 }}>{t("part.orderedOn")} {formatDbDate(part.ordered_at)}</div>}</td>
-                  <td><a className="strong" href={href({ name: "repair", id: part.repair_id })}>{part.repair_number}</a><div className="muted" style={{ fontSize: 12 }}>{part.customer_name} · {deviceLabel(part)}</div></td>
-                  <td>
+                  <td data-label={t("part.name")} className="cell-title"><strong>{part.name}</strong>{part.part_number && <div className="muted" style={{ fontSize: 12 }}>#{part.part_number}</div>}</td>
+                  <td data-label={t("part.quantity")}>{part.quantity}</td>
+                  <td data-label={t("part.unitCost")} className="nowrap">{formatMoney(part.unit_cost)}</td>
+                  <td data-label={t("part.supplier")}><div>{part.supplier || "—"}{part.ordered_at && <div className="muted" style={{ fontSize: 12 }}>{t("part.orderedOn")} {formatDbDate(part.ordered_at)}</div>}</div></td>
+                  <td data-label={t("repair.number")}><div><a className="strong" href={href({ name: "repair", id: part.repair_id })}>{part.repair_number}</a><div className="muted" style={{ fontSize: 12 }}>{part.customer_name} · {deviceLabel(part)}</div></div></td>
+                  <td data-label={t("part.status")}>
                     <select className="input" style={{ minHeight: 30, padding: "3px 8px", width: "auto" }} value={part.status} onChange={(e) => void setStatus(part, e.target.value as Part["status"])} aria-label={t("part.status")}>
                       {partStatuses.map((s) => <option key={s} value={s}>{t(`part.status.${s}`)}</option>)}
                     </select>

@@ -114,3 +114,20 @@ test("branding is public so the sign-in page can show the logo, but settings are
   const settings = await app.inject({ method: "GET", url: "/api/settings" });
   assert.equal(settings.statusCode, 401);
 });
+
+test("the installable-app manifest and icons are public", async (t) => {
+  const app = testApp();
+  t.after(() => app.close());
+  const manifest = await app.inject({ method: "GET", url: "/api/app/manifest.webmanifest" });
+  assert.equal(manifest.statusCode, 200);
+  assert.match(manifest.headers["content-type"], /manifest\+json/);
+  const body = manifest.json();
+  assert.equal(body.display, "standalone");
+  assert.ok(body.icons.some((icon) => icon.purpose === "maskable"));
+  // With no logo saved yet, icons fall back to the bundled DBRepairs icons.
+  const icon = await app.inject({ method: "GET", url: "/api/app/icon-192.png" });
+  assert.equal(icon.statusCode, 302);
+  assert.equal(icon.headers.location, "/icons/icon-192.png");
+  const unknown = await app.inject({ method: "GET", url: "/api/app/secrets.png" });
+  assert.equal(unknown.statusCode, 404);
+});

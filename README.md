@@ -85,6 +85,7 @@ Live overview with:
 - One central PostgreSQL database for simultaneous use from multiple computers.
 - Personal sign-ins for every team member, with admin and tech roles.
 - Team chat: one shared channel with tags, open-question tracking, file attachments and clickable links and repair numbers.
+- Installable on phones and tablets as an app (PWA) with the shop logo as its icon, and a phone layout with bottom tabs.
 - Browser interface reusing the desktop workflow and translations.
 - Transactional HTTP API and automatic schema migrations.
 - Docker Compose stack for a server or Portainer.
@@ -109,7 +110,7 @@ Live overview with:
 Download the `.deb` package and install it with:
 
 ```bash
-sudo apt install ./DBRepairs_0.4.0_amd64.deb
+sudo apt install ./DBRepairs_0.5.0_amd64.deb
 ```
 
 ### Fedora / RHEL compatible distributions
@@ -117,7 +118,7 @@ sudo apt install ./DBRepairs_0.4.0_amd64.deb
 Download the `.rpm` package and install it with your distribution package manager, for example:
 
 ```bash
-sudo dnf install ./DBRepairs-0.4.0-1.x86_64.rpm
+sudo dnf install ./DBRepairs-0.5.0-1.x86_64.rpm
 ```
 
 ## Development
