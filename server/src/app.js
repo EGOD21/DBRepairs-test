@@ -421,7 +421,8 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
     return reply.header("Content-Type", "image/png").header("Cache-Control", "no-cache").send(Buffer.from(match[1], "base64"));
   });
 
-  app.put("/api/settings", async (request, reply) => {
+  // The logo plus its four app icons can be several megabytes of base64.
+  app.put("/api/settings", { bodyLimit: 16 * 1024 * 1024 }, async (request, reply) => {
     requireAdmin(request);
     const settings = settingsInput(request.body);
     const client = await pool.connect();

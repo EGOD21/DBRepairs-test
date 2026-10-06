@@ -14,7 +14,6 @@ if (isServerMode) {
     document.head.appendChild(element);
   };
   add("link", { rel: "manifest", href: "/api/app/manifest.webmanifest" });
-  add("link", { rel: "apple-touch-icon", href: "/api/app/apple-touch-icon.png" });
   // Service workers only run over HTTPS (for example Tailscale Serve) or on localhost.
   if ("serviceWorker" in navigator && window.isSecureContext) {
     window.addEventListener("load", () => {
