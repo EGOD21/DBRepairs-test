@@ -1,289 +1,77 @@
-import { FormEvent, useCallback, useEffect, useState } from "react";
-import {
-  createCustomer,
-  Customer,
-  CustomerInput,
-  deleteCustomer,
-  listCustomers,
-  updateCustomer,
-} from "../data/customers";
+import { useEffect, useMemo, useState } from "react";
+import Icon from "../components/Icon";
+import CustomerFormModal from "../components/CustomerFormModal";
+import { Customer, listCustomers } from "../data/customers";
+import { fill, formatMoney } from "../lib/format";
+import { mailtoLink, telLink } from "../lib/email";
 import { useI18n } from "../i18n/I18nProvider";
-import { listRepairsByCustomer, Repair } from "../data/repairs";
-import { formatDbDate } from "../data/dates";
+import { href, navigate } from "../router";
 
-const emptyCustomer: CustomerInput = {
-  name: "",
-  company: "",
-  taxNumber: "",
-  phone: "",
-  email: "",
-  address: "",
-  notes: "",
-};
+type Filter = "all" | "residential" | "commercial" | "retainer";
 
-function toInput(customer: Customer): CustomerInput {
-  return {
-    name: customer.name,
-    company: customer.company ?? "",
-    taxNumber: customer.tax_number ?? "",
-    phone: customer.phone ?? "",
-    email: customer.email ?? "",
-    address: customer.address ?? "",
-    notes: customer.notes ?? "",
-  };
-}
-
-export default function CustomersPage() {
+export default function CustomersPage({ filter }: { filter?: string }) {
   const { t } = useI18n();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [search, setSearch] = useState("");
+  const [kind, setKind] = useState<Filter>("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [editing, setEditing] = useState<Customer | null>(null);
-  const [form, setForm] = useState<CustomerInput>(emptyCustomer);
-  const [formOpen, setFormOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [customerRepairs, setCustomerRepairs] = useState<Repair[]>([]);
-  const [customerRepairsLoading, setCustomerRepairsLoading] = useState(false);
-
-  const refresh = useCallback(async (query = search) => {
-    setLoading(true);
-    setError("");
-    try {
-      setCustomers(await listCustomers(query));
-    } catch (cause) {
-      console.error(cause);
-      setError(t("common.databaseError"));
-    } finally {
-      setLoading(false);
-    }
-  }, [search, t]);
+  const [creating, setCreating] = useState(filter === "new");
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void refresh(search), 180);
-    return () => window.clearTimeout(timer);
-  }, [search, refresh]);
+    let active = true;
+    const timer = window.setTimeout(() => {
+      listCustomers(search)
+        .then((list) => { if (active) { setCustomers(list); setError(""); } })
+        .catch((cause) => { console.error(cause); if (active) setError(t("common.databaseError")); })
+        .finally(() => { if (active) setLoading(false); });
+    }, 180);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [search]);
 
-  function openCreate() {
-    setEditing(null);
-    setCustomerRepairs([]);
-    setForm(emptyCustomer);
-    setError("");
-    setFormOpen(true);
-  }
-
-  async function openEdit(customer: Customer) {
-    setEditing(customer);
-    setForm(toInput(customer));
-    setError("");
-    setCustomerRepairs([]);
-    setCustomerRepairsLoading(true);
-    setFormOpen(true);
-    try {
-      setCustomerRepairs(await listRepairsByCustomer(customer.id));
-    } catch (cause) {
-      console.error(cause);
-      setError(t("common.databaseError"));
-    } finally {
-      setCustomerRepairsLoading(false);
-    }
-  }
-
-  function closeForm() {
-    if (saving) return;
-    setFormOpen(false);
-    setEditing(null);
-    setCustomerRepairs([]);
-    setForm(emptyCustomer);
-  }
-
-  function updateField(field: keyof CustomerInput, value: string) {
-    setForm((current) => ({ ...current, [field]: value }));
-  }
-
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    if (!form.name.trim()) return;
-
-    setSaving(true);
-    setError("");
-    try {
-      if (editing) await updateCustomer(editing.id, form);
-      else await createCustomer(form);
-      closeForm();
-      await refresh(search);
-    } catch (cause) {
-      console.error(cause);
-      setError(t("common.saveError"));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function remove(customer: Customer) {
-    if (!window.confirm(t("customers.deleteConfirm").replace("{name}", customer.name))) return;
-    setError("");
-    try {
-      await deleteCustomer(customer.id);
-      await refresh(search);
-    } catch (cause) {
-      console.error(cause);
-      setError(t("customers.deleteBlocked"));
-    }
-  }
+  const filtered = useMemo(() => customers.filter((c) =>
+    kind === "all" || (kind === "retainer" ? c.is_retainer : c.customer_type === kind)), [customers, kind]);
 
   return (
-    <>
+    <div className="page">
       <header className="page-header">
-        <div>
-          <h1>{t("customers.title")}</h1>
-          <p>{t("customers.subtitle")}</p>
-        </div>
-        <button className="primary" onClick={openCreate}>+ {t("customers.new")}</button>
+        <div><h1>{t("customers.title")}</h1><p>{t("customers.subtitle")}</p></div>
+        <div className="page-actions"><button type="button" className="btn btn-primary" onClick={() => setCreating(true)}><Icon name="plus" size={16} />{t("customers.new")}</button></div>
       </header>
-
-      <section className="panel customers-panel">
+      {error && <div className="alert error">{error}</div>}
+      <section className="card">
         <div className="toolbar">
-          <input
-            className="search-input"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder={t("customers.search")}
-            aria-label={t("customers.search")}
-          />
-          <span className="muted">{t("customers.count").replace("{count}", String(customers.length))}</span>
+          <div className="search"><Icon name="search" size={16} /><input className="input" value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t("customers.search")} aria-label={t("customers.search")} /></div>
+          <div className="segmented" role="group">
+            {(["all", "residential", "commercial", "retainer"] as Filter[]).map((f) => <button key={f} type="button" className={kind === f ? "active" : ""} onClick={() => setKind(f)}>{t(`customers.filter.${f}`)}</button>)}
+          </div>
+          <span className="count">{fill(t("customers.count"), { count: filtered.length })}</span>
         </div>
-
-        {error && <div className="alert error">{error}</div>}
-
-        {loading ? (
-          <div className="empty-state compact">{t("common.loading")}</div>
-        ) : customers.length === 0 ? (
-          <div className="empty-state compact">
-            <strong>{search ? t("customers.noResults") : t("customers.empty")}</strong>
-            {!search && <span>{t("customers.emptyHint")}</span>}
-          </div>
+        {loading ? <div className="empty">{t("common.loading")}</div> : filtered.length === 0 ? (
+          <div className="empty"><strong>{search || kind !== "all" ? t("customers.noResults") : t("customers.empty")}</strong>{!search && kind === "all" && <span>{t("customers.emptyHint")}</span>}</div>
         ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>{t("customer.name")}</th>
-                  <th>{t("customer.company")}</th>
-                  <th>{t("customer.phone")}</th>
-                  <th>{t("customer.email")}</th>
-                  <th>{t("customer.taxNumber")}</th>
-                  <th className="actions-column">{t("common.actions")}</th>
+          <div className="table-wrap"><table>
+            <thead><tr><th>{t("customer.name")}</th><th>{t("customer.type")}</th><th>{t("customer.email")}</th><th>{t("customer.phone")}</th><th>{t("customers.repairs")}</th><th>{t("customers.billed")}</th></tr></thead>
+            <tbody>{filtered.map((c) => {
+              const phone = c.mobile || c.phone;
+              return (
+                <tr key={c.id} className="clickable" onClick={() => navigate({ name: "customer", id: c.id })}>
+                  <td><strong><a href={href({ name: "customer", id: c.id })}>{c.name}</a></strong>{(c.company || c.contact_person) && <div className="muted" style={{ fontSize: 12 }}>{c.customer_type === "commercial" ? c.contact_person : c.company}</div>}</td>
+                  <td><div className="title-row">
+                    <span className="badge"><Icon name={c.customer_type === "commercial" ? "building" : "home"} size={12} />{t(`customer.type.${c.customer_type}`)}</span>
+                    {c.is_retainer && <span className="badge primary">{t("customer.retainer")}</span>}
+                  </div></td>
+                  <td onClick={(e) => e.stopPropagation()}>{c.email ? <a href={mailtoLink(c.email)}>{c.email}</a> : <span className="muted">—</span>}</td>
+                  <td onClick={(e) => e.stopPropagation()} className="nowrap">{phone ? <a href={telLink(phone)}>{phone}</a> : <span className="muted">—</span>}</td>
+                  <td>{c.repair_count}{c.open_repairs > 0 && <span className="badge accent" style={{ marginLeft: 6 }}>{fill(t("customers.openCount"), { count: c.open_repairs })}</span>}</td>
+                  <td className="nowrap">{c.total_billed ? formatMoney(c.total_billed) : <span className="muted">—</span>}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {customers.map((customer) => (
-                  <tr key={customer.id}>
-                    <td><strong>{customer.name}</strong></td>
-                    <td>{customer.company || "—"}</td>
-                    <td>{customer.phone || "—"}</td>
-                    <td>{customer.email || "—"}</td>
-                    <td>{customer.tax_number || "—"}</td>
-                    <td className="row-actions">
-                      <button className="secondary small" onClick={() => void openEdit(customer)}>{t("common.edit")}</button>
-                      <button className="danger-link small" onClick={() => void remove(customer)}>{t("common.delete")}</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              );
+            })}</tbody>
+          </table></div>
         )}
       </section>
-
-      {formOpen && (
-        <div className="modal-backdrop" role="presentation" onMouseDown={(event) => {
-          if (event.target === event.currentTarget) closeForm();
-        }}>
-          <section className={`modal ${editing ? "customer-detail-modal" : ""}`} role="dialog" aria-modal="true" aria-labelledby="customer-form-title">
-            <div className="modal-head">
-              <div>
-                <h2 id="customer-form-title">{editing ? t("customers.edit") : t("customers.new")}</h2>
-                <p>{t("customers.formHint")}</p>
-              </div>
-              <button className="icon-button" type="button" onClick={closeForm} aria-label={t("common.close")}>×</button>
-            </div>
-
-            <form onSubmit={(event) => void submit(event)}>
-              <div className="form-grid">
-                <label className="field full">
-                  <span>{t("customer.name")} *</span>
-                  <input autoFocus required value={form.name} onChange={(event) => updateField("name", event.target.value)} />
-                </label>
-                <label className="field">
-                  <span>{t("customer.company")}</span>
-                  <input value={form.company} onChange={(event) => updateField("company", event.target.value)} />
-                </label>
-                <label className="field">
-                  <span>{t("customer.taxNumber")}</span>
-                  <input value={form.taxNumber} onChange={(event) => updateField("taxNumber", event.target.value)} />
-                </label>
-                <label className="field">
-                  <span>{t("customer.phone")}</span>
-                  <input value={form.phone} onChange={(event) => updateField("phone", event.target.value)} />
-                </label>
-                <label className="field">
-                  <span>{t("customer.email")}</span>
-                  <input type="email" value={form.email} onChange={(event) => updateField("email", event.target.value)} />
-                </label>
-                <label className="field full">
-                  <span>{t("customer.address")}</span>
-                  <input value={form.address} onChange={(event) => updateField("address", event.target.value)} />
-                </label>
-                <label className="field full">
-                  <span>{t("customer.notes")}</span>
-                  <textarea rows={4} value={form.notes} onChange={(event) => updateField("notes", event.target.value)} />
-                </label>
-              </div>
-
-              {editing && (
-                <section className="customer-repairs-section">
-                  <div className="customer-repairs-head">
-                    <div>
-                      <h3>{t("customers.repairsTitle")}</h3>
-                      <p>{t("customers.repairsHint")}</p>
-                    </div>
-                    {!customerRepairsLoading && <span className="muted">{t("customers.repairsCount").replace("{count}", String(customerRepairs.length))}</span>}
-                  </div>
-                  {customerRepairsLoading ? (
-                    <div className="customer-repairs-empty">{t("common.loading")}</div>
-                  ) : customerRepairs.length === 0 ? (
-                    <div className="customer-repairs-empty">{t("customers.repairsEmpty")}</div>
-                  ) : (
-                    <div className="table-wrap customer-repairs-table">
-                      <table>
-                        <thead><tr><th>{t("print.repairNumber")}</th><th>{t("repair.device")}</th><th>{t("repair.status")}</th><th>{t("repair.openedAt")}</th></tr></thead>
-                        <tbody>
-                          {customerRepairs.map((repair) => (
-                            <tr key={repair.id}>
-                              <td><strong>{repair.repair_number}</strong></td>
-                              <td>{[repair.device_type, repair.brand, repair.model].filter(Boolean).join(" · ") || "—"}</td>
-                              <td><span className="status-pill">{t(repair.status_label_key)}</span></td>
-                              <td>{formatDbDate(repair.opened_at)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </section>
-              )}
-
-              <div className="modal-actions">
-                <button type="button" className="secondary" onClick={closeForm}>{t("common.cancel")}</button>
-                <button type="submit" className="primary" disabled={saving || !form.name.trim()}>
-                  {saving ? t("common.saving") : t("common.save")}
-                </button>
-              </div>
-            </form>
-          </section>
-        </div>
-      )}
-    </>
+      {creating && <CustomerFormModal onClose={() => setCreating(false)} onSaved={(id) => { setCreating(false); navigate({ name: "customer", id }); }} />}
+    </div>
   );
 }

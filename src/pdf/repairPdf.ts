@@ -1,6 +1,5 @@
 import { jsPDF } from "jspdf";
-import type { RepairPrintData } from "../components/RepairPrintSheet";
-import type { OfficeSettings } from "../data/settings";
+import type { OfficeSettings, RepairPrintData } from "../print/types";
 
 type Translate = (key:string)=>string;
 

@@ -1,7 +1,31 @@
 const FORMAT = "dbrepairs-portable";
-const VERSION = 1;
+const VERSION = 2;
+const SUPPORTED_VERSIONS = [1, 2];
 
 export class PortableBackupError extends Error {}
+
+// Fields added in version 2 are missing from version 1 archives; use their defaults.
+function optional(value, fallback, check) {
+  return value === undefined ? fallback : check(value);
+}
+
+function oneOf(value, name, options) {
+  if (!options.includes(value)) throw new PortableBackupError(`${name} must be one of ${options.join(", ")}`);
+  return value;
+}
+
+function plainDate(value, name) {
+  if (value === null) return null;
+  const result = text(value, name, { max: 40 }).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(result)) throw new PortableBackupError(`${name} must be a date`);
+  return result;
+}
+
+function wholeNumber(value, name) {
+  if (value === null) return null;
+  if (!Number.isSafeInteger(value) || value < 0) throw new PortableBackupError(`${name} must be a whole number`);
+  return value;
+}
 
 function record(value, name) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new PortableBackupError(`${name} must be an object`);
@@ -54,7 +78,7 @@ function unique(rows, field, name) {
 
 export function validatePortableBackup(value) {
   const archive = record(value, "backup");
-  if (archive.format !== FORMAT || archive.version !== VERSION) throw new PortableBackupError("Unsupported DBRepairs portable backup");
+  if (archive.format !== FORMAT || !SUPPORTED_VERSIONS.includes(archive.version)) throw new PortableBackupError("Unsupported DBRepairs portable backup");
   const data = record(archive.data, "data");
 
   const settings = array(data.settings, "settings").map((item, index) => {
@@ -78,6 +102,15 @@ export function validatePortableBackup(value) {
       phone: text(row.phone, `customers[${index}].phone`, { nullable: true }), email: text(row.email, `customers[${index}].email`, { nullable: true }),
       address: text(row.address, `customers[${index}].address`, { nullable: true }), notes: text(row.notes, `customers[${index}].notes`, { nullable: true }),
       created_at: timestamp(row.created_at, `customers[${index}].created_at`), updated_at: timestamp(row.updated_at, `customers[${index}].updated_at`),
+      customer_type: optional(row.customer_type, "residential", (v) => oneOf(v, `customers[${index}].customer_type`, ["residential", "commercial"])),
+      contact_person: optional(row.contact_person, null, (v) => text(v, `customers[${index}].contact_person`, { nullable: true })),
+      mobile: optional(row.mobile, null, (v) => text(v, `customers[${index}].mobile`, { nullable: true })),
+      preferred_contact: optional(row.preferred_contact, null, (v) => v === null ? null : oneOf(v, `customers[${index}].preferred_contact`, ["email", "phone", "sms"])),
+      tags: optional(row.tags, null, (v) => text(v, `customers[${index}].tags`, { nullable: true })),
+      is_retainer: optional(row.is_retainer, false, (v) => boolean(v, `customers[${index}].is_retainer`)),
+      retainer_plan: optional(row.retainer_plan, null, (v) => text(v, `customers[${index}].retainer_plan`, { nullable: true })),
+      retainer_monthly_fee: optional(row.retainer_monthly_fee, null, (v) => number(v, `customers[${index}].retainer_monthly_fee`)),
+      retainer_renewal_date: optional(row.retainer_renewal_date, null, (v) => plainDate(v, `customers[${index}].retainer_renewal_date`)),
     };
   });
   const repairs = array(data.repairs, "repairs").map((item, index) => {
@@ -94,6 +127,12 @@ export function validatePortableBackup(value) {
       internal_notes: text(row.internal_notes, `repairs[${index}].internal_notes`, { nullable: true }), opened_at: timestamp(row.opened_at, `repairs[${index}].opened_at`),
       closed_at: timestamp(row.closed_at, `repairs[${index}].closed_at`, true), created_at: timestamp(row.created_at, `repairs[${index}].created_at`),
       updated_at: timestamp(row.updated_at, `repairs[${index}].updated_at`),
+      priority: optional(row.priority, "normal", (v) => oneOf(v, `repairs[${index}].priority`, ["low", "normal", "high", "urgent"])),
+      due_date: optional(row.due_date, null, (v) => plainDate(v, `repairs[${index}].due_date`)),
+      technician: optional(row.technician, null, (v) => text(v, `repairs[${index}].technician`, { nullable: true })),
+      deposit: optional(row.deposit, null, (v) => number(v, `repairs[${index}].deposit`)),
+      paid: optional(row.paid, false, (v) => boolean(v, `repairs[${index}].paid`)),
+      warranty_days: optional(row.warranty_days, null, (v) => wholeNumber(v, `repairs[${index}].warranty_days`)),
     };
   });
   const history = array(data.history, "history").map((item, index) => {
@@ -105,6 +144,23 @@ export function validatePortableBackup(value) {
     };
   });
 
+  const parts = optional(data.parts, [], (v) => array(v, "parts")).map((item, index) => {
+    const row = record(item, `parts[${index}]`);
+    return {
+      id: integer(row.id, `parts[${index}].id`), repair_id: integer(row.repair_id, `parts[${index}].repair_id`),
+      name: text(row.name, `parts[${index}].name`, { max: 1000 }),
+      part_number: text(row.part_number, `parts[${index}].part_number`, { nullable: true }), supplier: text(row.supplier, `parts[${index}].supplier`, { nullable: true }),
+      url: text(row.url, `parts[${index}].url`, { nullable: true, max: 4000 }), quantity: integer(row.quantity, `parts[${index}].quantity`),
+      unit_cost: number(row.unit_cost, `parts[${index}].unit_cost`),
+      status: oneOf(row.status, `parts[${index}].status`, ["needed", "ordered", "received", "installed", "cancelled"]),
+      notes: text(row.notes, `parts[${index}].notes`, { nullable: true }),
+      ordered_at: timestamp(row.ordered_at, `parts[${index}].ordered_at`, true), received_at: timestamp(row.received_at, `parts[${index}].received_at`, true),
+      created_at: timestamp(row.created_at, `parts[${index}].created_at`), updated_at: timestamp(row.updated_at, `parts[${index}].updated_at`),
+    };
+  });
+  // Part links are opened from the app, so keep only web addresses.
+  if (parts.some((row) => row.url !== null && !/^https?:\/\//i.test(row.url))) throw new PortableBackupError("Part links must start with http:// or https://");
+
   if (!statuses.length) throw new PortableBackupError("At least one repair status is required");
   unique(settings, "key", "settings"); unique(statuses, "id", "statuses"); unique(statuses, "code", "statuses");
   unique(customers, "id", "customers"); unique(repairs, "id", "repairs"); unique(repairs, "repair_number", "repairs"); unique(history, "id", "history");
@@ -113,11 +169,13 @@ export function validatePortableBackup(value) {
   const repairIds = new Set(repairs.map((row) => row.id));
   if (repairs.some((row) => !customerIds.has(row.customer_id) || !statusIds.has(row.status_id))) throw new PortableBackupError("A repair references a missing customer or status");
   if (history.some((row) => !repairIds.has(row.repair_id) || !statusIds.has(row.status_id))) throw new PortableBackupError("Status history references a missing repair or status");
+  unique(parts, "id", "parts");
+  if (parts.some((row) => !repairIds.has(row.repair_id))) throw new PortableBackupError("A part references a missing repair");
 
   return {
-    format: FORMAT, version: VERSION, createdAt: timestamp(archive.createdAt, "createdAt"),
+    format: FORMAT, version: archive.version, createdAt: timestamp(archive.createdAt, "createdAt"),
     sourceEngine: archive.sourceEngine === "sqlite" || archive.sourceEngine === "postgresql" ? archive.sourceEngine : (() => { throw new PortableBackupError("Invalid source engine"); })(),
-    data: { settings, statuses, customers, repairs, history },
+    data: { settings, statuses, customers, repairs, history, parts },
   };
 }
 
@@ -125,16 +183,21 @@ export async function exportPortableBackup(pool) {
   const client = await pool.connect();
   try {
     await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
-    const [settings, statuses, customers, repairs, history] = await Promise.all([
+    const [settings, statuses, customers, repairs, history, parts] = await Promise.all([
       client.query("SELECT key,value FROM app_settings ORDER BY key"),
       client.query("SELECT id,code,label_key,sort_order,active FROM repair_statuses ORDER BY id"),
-      client.query("SELECT id,name,company,tax_number,phone,email,address,notes,created_at,updated_at FROM customers ORDER BY id"),
-      client.query("SELECT id,repair_number,customer_id,status_id,device_type,brand,model,serial_number,imei,reported_fault,accessories,general_condition,diagnosis,work_performed,estimated_value,final_value,internal_notes,opened_at,closed_at,created_at,updated_at FROM repairs ORDER BY id"),
+      client.query(`SELECT id,name,company,tax_number,phone,email,address,notes,created_at,updated_at,customer_type,contact_person,mobile,
+        preferred_contact,tags,is_retainer,retainer_plan,retainer_monthly_fee,retainer_renewal_date FROM customers ORDER BY id`),
+      client.query(`SELECT id,repair_number,customer_id,status_id,device_type,brand,model,serial_number,imei,reported_fault,accessories,general_condition,
+        diagnosis,work_performed,estimated_value,final_value,internal_notes,opened_at,closed_at,created_at,updated_at,priority,due_date,technician,
+        deposit,paid,warranty_days FROM repairs ORDER BY id`),
       client.query("SELECT id,repair_id,status_id,changed_at,note FROM repair_status_history ORDER BY id"),
+      client.query(`SELECT id,repair_id,name,part_number,supplier,url,quantity,unit_cost,status,notes,ordered_at,received_at,created_at,updated_at
+        FROM repair_parts ORDER BY id`),
     ]);
     await client.query("COMMIT");
     return { format: FORMAT, version: VERSION, createdAt: new Date().toISOString(), sourceEngine: "postgresql", data: {
-      settings: settings.rows, statuses: statuses.rows, customers: customers.rows, repairs: repairs.rows, history: history.rows,
+      settings: settings.rows, statuses: statuses.rows, customers: customers.rows, repairs: repairs.rows, history: history.rows, parts: parts.rows,
     } };
   } catch (error) {
     await client.query("ROLLBACK");
@@ -150,13 +213,17 @@ export async function importPortableBackup(pool, value) {
   try {
     await client.query("BEGIN");
     await client.query("SELECT pg_advisory_xact_lock(87234022)");
-    await client.query("DELETE FROM repair_status_history; DELETE FROM repairs; DELETE FROM customers; DELETE FROM repair_statuses; DELETE FROM app_settings");
-    for (const row of archive.data.settings) await client.query("INSERT INTO app_settings (key,value) VALUES ($1,$2)", [row.key,row.value]);
-    for (const row of archive.data.statuses) await client.query("INSERT INTO repair_statuses (id,code,label_key,sort_order,active) VALUES ($1,$2,$3,$4,$5)", [row.id,row.code,row.label_key,row.sort_order,row.active]);
-    for (const row of archive.data.customers) await client.query("INSERT INTO customers (id,name,company,tax_number,phone,email,address,notes,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)", Object.values(row));
-    for (const row of archive.data.repairs) await client.query(`INSERT INTO repairs (id,repair_number,customer_id,status_id,device_type,brand,model,serial_number,imei,reported_fault,accessories,general_condition,diagnosis,work_performed,estimated_value,final_value,internal_notes,opened_at,closed_at,created_at,updated_at) VALUES (${Array.from({length:21},(_,i)=>`$${i+1}`).join(",")})`, Object.values(row));
-    for (const row of archive.data.history) await client.query("INSERT INTO repair_status_history (id,repair_id,status_id,changed_at,note) VALUES ($1,$2,$3,$4,$5)", Object.values(row));
-    for (const table of ["repair_statuses","customers","repairs","repair_status_history"]) {
+    await client.query("DELETE FROM repair_parts; DELETE FROM repair_status_history; DELETE FROM repairs; DELETE FROM customers; DELETE FROM repair_statuses; DELETE FROM app_settings");
+    const tables = [["app_settings", archive.data.settings], ["repair_statuses", archive.data.statuses], ["customers", archive.data.customers],
+      ["repairs", archive.data.repairs], ["repair_status_history", archive.data.history], ["repair_parts", archive.data.parts]];
+    for (const [table, rows] of tables) {
+      for (const row of rows) {
+        // Column names come from the validated archive shape above, never from the file itself.
+        const columns = Object.keys(row);
+        await client.query(`INSERT INTO ${table} (${columns.join(",")}) VALUES (${columns.map((_, i) => `$${i + 1}`).join(",")})`, Object.values(row));
+      }
+    }
+    for (const table of ["repair_statuses","customers","repairs","repair_status_history","repair_parts"]) {
       await client.query(`SELECT setval(pg_get_serial_sequence('${table}','id'), COALESCE(MAX(id),1), MAX(id) IS NOT NULL) FROM ${table}`);
     }
     await client.query("COMMIT");

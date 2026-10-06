@@ -10,20 +10,20 @@ test("password comparison accepts only the exact password", () => {
   assert.equal(passwordMatches(undefined, "shop-password"), false);
 });
 
-test("issued sessions verify until they expire", () => {
+test("issued sessions verify until they expire and carry the user", () => {
   const now = Date.now();
-  const { token, maxAge } = issueSession(key, now);
-  assert.equal(verifySession(key, token, now), true);
-  assert.equal(verifySession(key, token, now + maxAge * 1000 + 1), false);
+  const { token, maxAge } = issueSession(key, { userId: 7, version: 3 }, now);
+  assert.deepEqual(verifySession(key, token, now), { userId: 7, version: 3 });
+  assert.equal(verifySession(key, token, now + maxAge * 1000 + 1), null);
 });
 
 test("sessions are rejected after tampering or a password change", () => {
-  const { token } = issueSession(key);
-  const [, nonce, signature] = token.split(".");
-  assert.equal(verifySession(key, `99999999999999.${nonce}.${signature}`), false);
-  assert.equal(verifySession(createSessionKey("a different password"), token), false);
-  assert.equal(verifySession(key, "garbage"), false);
-  assert.equal(verifySession(key, undefined), false);
+  const { token } = issueSession(key, { userId: 2, version: 1 });
+  const [, version, expires, nonce, signature] = token.split(".");
+  assert.equal(verifySession(key, `1.${version}.${expires}.${nonce}.${signature}`), null, "changing the user id breaks the signature");
+  assert.equal(verifySession(createSessionKey("a different password"), token), null);
+  assert.equal(verifySession(key, "garbage"), null);
+  assert.equal(verifySession(key, undefined), null);
 });
 
 test("cookies are read by name", () => {

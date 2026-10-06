@@ -1,243 +1,345 @@
-import { ChangeEvent, FormEvent, useEffect, useState } from "react";
+import { ChangeEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import Icon, { IconName } from "../components/Icon";
 import LanguageDropdown from "../components/LanguageDropdown";
-import { defaultOfficeSettings, getOfficeSettings, OfficeSettings, saveOfficeSettings } from "../data/settings";
+import { useI18n } from "../i18n/I18nProvider";
+import { useBranding } from "../branding";
+import { AppSettings, emptySettings, getSettings, prepareLogo, saveSettings, SettingKey } from "../data/settings";
 import { getDatabase } from "../data/database";
 import { listCustomers } from "../data/customers";
 import { listRepairs } from "../data/repairs";
-import { useI18n } from "../i18n/I18nProvider";
 import { downloadApiFile, downloadTextFile, restoreApiBackup } from "../data/api";
 import { isServerMode } from "../data/runtime";
 import { exportPortableBackup, importPortableBackup, parsePortableBackup } from "../data/portable";
+import { fontOptions, hubspotTheme, isSafeThemeValue, parseTheme, radiusOptions, Theme, ThemeField, themeFields, themePresets } from "../theme/theme";
+import { defaultLabelSize, labelSizes } from "../print/types";
+import { useSession } from "../session";
+import { MyAccountSection, TeamSection } from "../components/TeamSettings";
 
-export default function SettingsPage(){
-  const {t,locale,setLocale,locales}=useI18n();
-  const [form,setForm]=useState<OfficeSettings>(defaultOfficeSettings);
-  const [saving,setSaving]=useState(false);
-  const [saved,setSaved]=useState(false);
-  const [error,setError]=useState("");
-  const [backupRunning,setBackupRunning]=useState(false);
-  const [backupPath,setBackupPath]=useState("");
-  const [restoreRunning,setRestoreRunning]=useState(false);
-  const [portableRunning,setPortableRunning]=useState<"export"|"restore"|"">("");
-  const [portablePath,setPortablePath]=useState("");
-  const [exportRunning,setExportRunning]=useState<"customers"|"repairs"|"">("");
-  const [exportPath,setExportPath]=useState("");
+type Notice = { tone: "success" | "error"; text: string } | null;
 
-  useEffect(()=>{getOfficeSettings().then(setForm).catch(()=>setError(t("common.databaseError")));},[]);
-  const set=(key:keyof OfficeSettings,value:string)=>{setSaved(false);setForm(f=>({...f,[key]:value}));};
+function Section({ id, icon, title, hint, children, footer }: { id: string; icon: IconName; title: string; hint?: string; children: ReactNode; footer?: ReactNode }) {
+  return (
+    <section className="card" id={id}>
+      <div className="card-header"><div><h2 className="title-row"><Icon name={icon} size={17} />{title}</h2>{hint && <p>{hint}</p>}</div></div>
+      <div className="card-body">{children}</div>
+      {footer && <div className="card-footer">{footer}</div>}
+    </section>
+  );
+}
 
-  function chooseLogo(e:ChangeEvent<HTMLInputElement>){
-    const file=e.target.files?.[0]; if(!file) return;
-    if(!file.type.startsWith("image/")){setError(t("settings.logoInvalid"));return;}
-    if(file.size>2*1024*1024){setError(t("settings.logoTooLarge"));return;}
-    const reader=new FileReader();
-    reader.onload=()=>{set("logoDataUrl",String(reader.result||""));setError("");};
-    reader.readAsDataURL(file);
-    e.target.value="";
+const csvCell = (value: unknown) => {
+  let text = String(value ?? "");
+  // Spreadsheet apps run cells starting with these characters as formulas.
+  if (typeof value === "string" && /^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+  return `"${text.replace(/"/g, '""')}"`;
+};
+
+export default function SettingsPage() {
+  const { t, locale, setLocale, locales } = useI18n();
+  const branding = useBranding();
+  const { isAdmin, teamFeatures } = useSession();
+  const [settings, setSettings] = useState<AppSettings>(emptySettings);
+  const [saved, setSaved] = useState<AppSettings>(emptySettings);
+  const [theme, setTheme] = useState<Theme>(branding.theme);
+  const [notice, setNotice] = useState<Notice>(null);
+  const [busy, setBusy] = useState("");
+
+  useEffect(() => {
+    getSettings().then((s) => { setSettings(s); setSaved(s); setTheme(parseTheme(s["ui.theme"])); }).catch(() => setNotice({ tone: "error", text: t("common.databaseError") }));
+    return () => branding.previewTheme(null);
+  }, []);
+
+  useEffect(() => { branding.previewTheme(theme); }, [theme]);
+
+  const set = (key: SettingKey, value: string) => setSettings((s) => ({ ...s, [key]: value }));
+  const changed = (keys: SettingKey[]) => keys.some((key) => settings[key] !== saved[key]);
+  const savedTheme = useMemo(() => parseTheme(saved["ui.theme"]), [saved]);
+  const themeChanged = JSON.stringify(theme) !== JSON.stringify(savedTheme);
+
+  async function persist(keys: SettingKey[], values: Partial<AppSettings> = {}) {
+    const payload = Object.fromEntries(keys.map((key) => [key, values[key] ?? settings[key]])) as Partial<AppSettings>;
+    setBusy(keys[0]); setNotice(null);
+    try {
+      await saveSettings(payload);
+      setSaved((s) => ({ ...s, ...payload }));
+      setSettings((s) => ({ ...s, ...payload }));
+      await branding.refresh();
+      setNotice({ tone: "success", text: t("settings.saved") });
+      return true;
+    } catch (cause) {
+      console.error(cause);
+      setNotice({ tone: "error", text: cause instanceof Error && cause.message ? cause.message : t("common.saveError") });
+      return false;
+    } finally {
+      setBusy("");
+    }
   }
 
-  async function submit(e:FormEvent){
-    e.preventDefault();setSaving(true);setError("");
-    try{await saveOfficeSettings(form);setSaved(true);}catch{setError(t("common.saveError"));}
-    finally{setSaving(false);}
+  async function chooseLogo(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (file.size > 15 * 1024 * 1024) { setNotice({ tone: "error", text: t("settings.logoTooLarge") }); return; }
+    try {
+      const logo = await prepareLogo(file);
+      await persist(["office.logoDataUrl"], { "office.logoDataUrl": logo });
+    } catch {
+      setNotice({ tone: "error", text: t("settings.logoInvalid") });
+    }
   }
 
-  async function createNativeBackup(){
-    if(isServerMode) return downloadApiFile("/backups/database");
-      const db=await getDatabase();
-      await db.execute("PRAGMA wal_checkpoint(FULL)");
+  async function saveTheme() {
+    if (await persist(["ui.theme"], { "ui.theme": JSON.stringify(theme) })) branding.previewTheme(null);
+  }
+
+  const businessKeys: SettingKey[] = ["office.companyName", "office.taxNumber", "office.address", "office.phone", "office.email", "office.website"];
+  const printKeys: SettingKey[] = ["print.autoPrint", "print.labelSize", "print.terms"];
+  const groups = useMemo(() => {
+    const byGroup = new Map<string, ThemeField[]>();
+    for (const field of themeFields) byGroup.set(field.group, [...(byGroup.get(field.group) ?? []), field]);
+    return Array.from(byGroup.entries());
+  }, []);
+
+  // ---- Data: native backups, portable backups and CSV exports ----
+  async function nativeBackup() {
+    if (isServerMode) return downloadApiFile("/backups/database");
+    const db = await getDatabase();
+    await db.execute("PRAGMA wal_checkpoint(FULL)");
     return invoke<string>("backup_database");
   }
 
-  async function createBackup(){
-    if(backupRunning) return;
-    setBackupRunning(true);setBackupPath("");setError("");
-    try{
-      setBackupPath(await createNativeBackup());
-    }catch(cause){
+  async function run(label: string, action: () => Promise<string | void>) {
+    if (busy) return;
+    setBusy(label); setNotice(null);
+    try {
+      const result = await action();
+      setNotice({ tone: "success", text: result ? `${t("settings.done")} ${result}` : t("settings.done") });
+    } catch (cause) {
       console.error(cause);
-      setError(t("settings.backupError"));
-    }finally{
-      setBackupRunning(false);
+      setNotice({ tone: "error", text: t("settings.actionError") });
+    } finally {
+      setBusy("");
     }
   }
 
-  async function createPortable(){
-    if(portableRunning) return;
-    setPortableRunning("export");setPortablePath("");setError("");
-    try{setPortablePath(await exportPortableBackup());}
-    catch(cause){console.error(cause);setError(t("settings.portableError"));}
-    finally{setPortableRunning("");}
-  }
-
-  async function restorePortable(e:ChangeEvent<HTMLInputElement>){
-    const file=e.target.files?.[0];e.target.value="";
-    if(!file||portableRunning) return;
-    if(!file.name.toLowerCase().endsWith(".dbrepairs")){setError(t("settings.portableInvalid"));return;}
-    let archive;
-    try{archive=parsePortableBackup(await file.text());}
-    catch(cause){console.error(cause);setError(t("settings.portableInvalid"));return;}
-    if(!window.confirm(t("settings.portableConfirm"))) return;
-    setPortableRunning("restore");setError("");setPortablePath("");
-    try{
-      setBackupPath(await createNativeBackup());
-      await importPortableBackup(archive);
-      window.location.reload();
-    }catch(cause){console.error(cause);setError(t("settings.portableRestoreError"));}
-    finally{setPortableRunning("");}
-  }
-
-  async function restoreBackup(e:ChangeEvent<HTMLInputElement>){
-    const file=e.target.files?.[0];
-    e.target.value="";
-    if(!file||restoreRunning) return;
-    const expectedExtension=isServerMode?".dump":".db";
-    if(!file.name.toLowerCase().endsWith(expectedExtension)){setError(t(isServerMode?"settings.restoreServerInvalid":"settings.restoreInvalid"));return;}
-    if(!window.confirm(t(isServerMode?"settings.restoreServerConfirm":"settings.restoreConfirm"))) return;
-    setRestoreRunning(true);setError("");
-    try{
-      const buffer=await file.arrayBuffer();
-      const bytes=new Uint8Array(buffer);
-      if(isServerMode){
-        const header=new TextDecoder("ascii").decode(bytes.slice(0,5));
-        if(header!=="PGDMP"){setError(t("settings.restoreServerInvalid"));return;}
+  async function restoreNative(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    const extension = isServerMode ? ".dump" : ".db";
+    if (!file.name.toLowerCase().endsWith(extension)) { setNotice({ tone: "error", text: t(isServerMode ? "settings.restoreServerInvalid" : "settings.restoreInvalid") }); return; }
+    if (!window.confirm(t(isServerMode ? "settings.restoreServerConfirm" : "settings.restoreConfirm"))) return;
+    await run("restore", async () => {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      if (isServerMode) {
+        if (new TextDecoder("ascii").decode(bytes.slice(0, 5)) !== "PGDMP") throw new Error("invalid");
         await downloadApiFile("/backups/database");
-        await restoreApiBackup(buffer);
+        await restoreApiBackup(bytes.buffer);
         window.location.reload();
         return;
       }
-      const header=new TextDecoder("utf-8").decode(bytes.slice(0,16));
-      if(header!=="SQLite format 3\0"){setError(t("settings.restoreInvalid"));return;}
-      const db=await getDatabase();
+      if (new TextDecoder("utf-8").decode(bytes.slice(0, 16)) !== "SQLite format 3\0") throw new Error("invalid");
+      const db = await getDatabase();
       await db.execute("PRAGMA wal_checkpoint(FULL)");
-      await invoke("restore_database",bytes);
-    }catch(cause){console.error(cause);setError(t("settings.restoreError"));}
-    finally{setRestoreRunning(false);}
+      await invoke("restore_database", bytes);
+    });
   }
 
-  const csvCell=(value:unknown)=>{
-    let text=String(value??"");
-    // Spreadsheet apps run cells starting with these characters as formulas.
-    if(typeof value==="string"&&/^[=+\-@\t\r]/.test(text)) text=`'${text}`;
-    return `"${text.replace(/"/g,'""')}"`;
-  };
-
-  async function exportCustomers(){
-    if(exportRunning) return;
-    setExportRunning("customers");setExportPath("");setError("");
-    try{
-      const rows=await listCustomers();
-      const header=["ID","Nome","Empresa","NIF","Telefone","Email","Morada","Notas","Criado","Atualizado"];
-      const body=rows.map(c=>[
-        c.id,c.name,c.company,c.tax_number,c.phone,c.email,c.address,c.notes,c.created_at,c.updated_at
-      ].map(csvCell).join(";"));
-      const csv="\ufeff"+header.map(csvCell).join(";")+"\n"+body.join("\n");
-      if(isServerMode){downloadTextFile(csv,"DBRepairs-clientes.csv");setExportPath("DBRepairs-clientes.csv");return;}
-      const path=await invoke<string>("export_text_file",{filename:"DBRepairs-clientes.csv",content:csv});
-      setExportPath(path);
-    }catch(cause){
-      console.error(cause);
-      setError(t("settings.exportError"));
-    }finally{
-      setExportRunning("");
-    }
+  async function restorePortable(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    let archive;
+    try { archive = parsePortableBackup(await file.text()); } catch { setNotice({ tone: "error", text: t("settings.portableInvalid") }); return; }
+    if (!window.confirm(t("settings.portableConfirm"))) return;
+    await run("portable-restore", async () => {
+      await nativeBackup();
+      await importPortableBackup(archive);
+      window.location.reload();
+    });
   }
 
-  async function exportRepairs(){
-    if(exportRunning) return;
-    setExportRunning("repairs");setExportPath("");setError("");
-    try{
-      const rows=await listRepairs();
-      const header=["ID","Reparação","Cliente","Estado","Tipo","Marca","Modelo","Serial","IMEI","Problema","Acessórios","Estado geral","Diagnóstico","Trabalho realizado","Valor previsto","Valor final","Notas internas","Entrada","Fecho"];
-      const body=rows.map(r=>[
-        r.id,r.repair_number,r.customer_name,t(r.status_label_key),r.device_type,r.brand,r.model,r.serial_number,r.imei,
-        r.reported_fault,r.accessories,r.general_condition,r.diagnosis,r.work_performed,r.estimated_value,r.final_value,
-        r.internal_notes,r.opened_at,r.closed_at
-      ].map(csvCell).join(";"));
-      const csv="\ufeff"+header.map(csvCell).join(";")+"\n"+body.join("\n");
-      if(isServerMode){downloadTextFile(csv,"DBRepairs-reparacoes.csv");setExportPath("DBRepairs-reparacoes.csv");return;}
-      const path=await invoke<string>("export_text_file",{filename:"DBRepairs-reparacoes.csv",content:csv});
-      setExportPath(path);
-    }catch(cause){
-      console.error(cause);
-      setError(t("settings.exportError"));
-    }finally{
-      setExportRunning("");
-    }
+  async function exportCsv(kind: "customers" | "repairs") {
+    await run(`csv-${kind}`, async () => {
+      let rows: unknown[][];
+      let header: string[];
+      if (kind === "customers") {
+        header = ["ID", t("customer.name"), t("customer.type"), t("customer.company"), t("customer.contactPerson"), t("customer.taxNumber"), t("customer.phone"), t("customer.mobile"), t("customer.email"), t("customer.address"), t("customer.retainer"), t("customer.retainerPlan"), t("customer.retainerMonthlyFee"), t("customer.tags"), t("customer.notes"), t("customers.repairs"), t("customers.billed"), t("customer.since")];
+        rows = (await listCustomers()).map((c) => [c.id, c.name, t(`customer.type.${c.customer_type}`), c.company, c.contact_person, c.tax_number, c.phone, c.mobile, c.email, c.address, c.is_retainer ? "✓" : "", c.retainer_plan, c.retainer_monthly_fee, c.tags, c.notes, c.repair_count, c.total_billed, c.created_at]);
+      } else {
+        header = ["ID", t("repair.number"), t("repair.customer"), t("repair.status"), t("repair.priority"), t("repair.deviceType"), t("repair.brand"), t("repair.model"), t("repair.serialNumber"), t("repair.imei"), t("repair.reportedFault"), t("repair.accessories"), t("repair.generalCondition"), t("repair.diagnosis"), t("repair.workPerformed"), t("repair.technician"), t("repair.dueDate"), t("repair.estimatedValue"), t("repair.finalValue"), t("repair.deposit"), t("repair.paid"), t("repair.warrantyDays"), t("repair.internalNotes"), t("repair.openedAt"), t("repair.closedAt")];
+        rows = (await listRepairs()).map((r) => [r.id, r.repair_number, r.customer_name, t(r.status_label_key), t(`priority.${r.priority}`), r.device_type, r.brand, r.model, r.serial_number, r.imei, r.reported_fault, r.accessories, r.general_condition, r.diagnosis, r.work_performed, r.technician, r.due_date, r.estimated_value, r.final_value, r.deposit, r.paid ? "✓" : "", r.warranty_days, r.internal_notes, r.opened_at, r.closed_at]);
+      }
+      const csv = "﻿" + [header, ...rows].map((row) => row.map(csvCell).join(";")).join("\n");
+      const filename = `DBRepairs-${kind}.csv`;
+      if (isServerMode) { downloadTextFile(csv, filename); return filename; }
+      return invoke<string>("export_text_file", { filename, content: csv });
+    });
   }
 
-  return <>
-    <header className="page-header"><div><h1>{t("settings.title")}</h1><p>{t("settings.subtitle")}</p></div></header>
-    {error&&<div className="alert error settings-alert">{error}</div>}
-    {saved&&<div className="alert success settings-alert">{t("settings.saved")}</div>}
-    <form className="settings-stack" onSubmit={submit}>
-      <section className="panel settings-panel">
-        <h2>{t("settings.language")}</h2>
-        <p>{t("settings.languageHint")}</p>
-        <div className="settings-field"><LanguageDropdown locale={locale} setLocale={setLocale} locales={locales} label={t("settings.language")} searchLabel={t("settings.searchLanguage")}/></div>
-      </section>
-      <section className="panel settings-panel">
-        <div className="panel-head">
-          <div><h2>{t("settings.backup")}</h2><p>{t("settings.backupHint")}</p></div>
-          <div className="export-actions">
-            <button type="button" className="secondary" disabled={backupRunning||restoreRunning} onClick={()=>void createBackup()}>
-              {backupRunning?t("settings.backupRunning"):t("settings.createBackup")}
-            </button>
-            <label className={`secondary file-button ${restoreRunning?"disabled":""}`}>
-              {restoreRunning?t("settings.restoreRunning"):t("settings.restoreBackup")}
-              <input type="file" accept={isServerMode?".dump,application/octet-stream":".db,application/x-sqlite3,application/vnd.sqlite3"} disabled={backupRunning||restoreRunning} onChange={restoreBackup}/>
-            </label>
-          </div>
+  // Techs only see their own account and language; admins see everything.
+  const nav: [string, IconName, string][] = [
+    ...(teamFeatures ? [["account", "users", t("account.title")] as [string, IconName, string]] : []),
+    ...(isAdmin ? [["business", "building", t("settings.office")], ["appearance", "palette", t("settings.appearance")], ["printing", "printer", t("settings.printing")],
+      ["email", "mail", t("settings.emailSection")]] as [string, IconName, string][] : []),
+    ...(isAdmin && teamFeatures ? [["team", "users", t("team.title")] as [string, IconName, string]] : []),
+    ["language", "globe", t("settings.language")],
+    ...(isAdmin ? [["data", "database", t("settings.data")] as [string, IconName, string]] : []),
+  ];
+
+  return (
+    <div className="page">
+      <header className="page-header"><div><h1>{t("settings.title")}</h1><p>{t("settings.subtitle")}</p></div></header>
+      {notice && <div className={`alert ${notice.tone}`} role="status">{notice.text}</div>}
+      <div className="settings-layout">
+        <nav className="settings-nav" aria-label={t("settings.title")}>
+          {nav.map(([id, icon, label]) => (
+            <a key={id} href={`#/settings`} onClick={(e) => { e.preventDefault(); document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" }); }}><Icon name={icon} size={16} />{label}</a>
+          ))}
+        </nav>
+        <div className="settings-sections">
+          {teamFeatures && <Section id="account" icon="users" title={t("account.title")}><MyAccountSection /></Section>}
+          {isAdmin && <>
+          <Section id="business" icon="building" title={t("settings.office")} hint={t("settings.officeHint")}
+            footer={<button type="button" className="btn btn-primary" disabled={!changed(businessKeys) || busy !== ""} onClick={() => void persist(businessKeys)}>{t("common.saveChanges")}</button>}>
+            <div className="form-grid">
+              <div className="field full">
+                <span>{t("settings.logo")}</span>
+                <div className="logo-row">
+                  <div className="logo-preview"><img src={branding.logo} alt="" /></div>
+                  <div className="page-actions">
+                    <label className="btn file-button"><Icon name="plus" size={15} />{t("settings.chooseLogo")}<input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => void chooseLogo(e)} /></label>
+                    {settings["office.logoDataUrl"] && <button type="button" className="btn btn-danger" onClick={() => void persist(["office.logoDataUrl"], { "office.logoDataUrl": "" })}>{t("settings.removeLogo")}</button>}
+                  </div>
+                  <small className="hint">{t("settings.logoHint")}</small>
+                </div>
+              </div>
+              <label className="field full"><span>{t("settings.companyName")}</span><input value={settings["office.companyName"]} onChange={(e) => set("office.companyName", e.target.value)} /></label>
+              <label className="field"><span>{t("settings.taxNumber")}</span><input value={settings["office.taxNumber"]} onChange={(e) => set("office.taxNumber", e.target.value)} /></label>
+              <label className="field"><span>{t("settings.phone")}</span><input value={settings["office.phone"]} onChange={(e) => set("office.phone", e.target.value)} /></label>
+              <label className="field"><span>{t("settings.email")}</span><input type="email" value={settings["office.email"]} onChange={(e) => set("office.email", e.target.value)} /></label>
+              <label className="field"><span>{t("settings.website")}</span><input value={settings["office.website"]} onChange={(e) => set("office.website", e.target.value)} /></label>
+              <label className="field full"><span>{t("settings.address")}</span><input value={settings["office.address"]} onChange={(e) => set("office.address", e.target.value)} /></label>
+            </div>
+          </Section>
+
+          <Section id="appearance" icon="palette" title={t("settings.appearance")} hint={t("settings.appearanceHint")}
+            footer={<>
+              <button type="button" className="btn" onClick={() => setTheme(hubspotTheme)}>{t("settings.resetTheme")}</button>
+              <button type="button" className="btn" disabled={!themeChanged} onClick={() => setTheme(savedTheme)}>{t("common.cancel")}</button>
+              <button type="button" className="btn btn-primary" disabled={!themeChanged || busy !== ""} onClick={() => void saveTheme()}>{t("settings.saveTheme")}</button>
+            </>}>
+            <div style={{ display: "grid", gap: 16 }}>
+              <div className="theme-presets">
+                {themePresets.map((preset) => (
+                  <button key={preset.id} type="button" className={`preset${JSON.stringify(preset.theme) === JSON.stringify(theme) ? " active" : ""}`} onClick={() => setTheme(preset.theme)}>
+                    <div className="preset-swatches">{[preset.theme.sidebar, preset.theme.background, preset.theme.primary, preset.theme.accent].map((c, i) => <span key={i} style={{ background: c }} />)}</div>
+                    <strong style={{ fontSize: 13 }}>{preset.label}</strong>
+                  </button>
+                ))}
+              </div>
+              {groups.map(([group, fields]) => (
+                <div key={group} style={{ display: "grid", gap: 8 }}>
+                  <div className="theme-group-title">{t(`theme.group.${group}`)}</div>
+                  <div className="color-grid">
+                    {fields.map((field) => <ThemeInput key={field.key} field={field} value={theme[field.key]} label={t(`theme.${field.key}`)} customLabel={t("theme.customFont")}
+                      onChange={(value) => { if (isSafeThemeValue(value)) setTheme((current) => ({ ...current, [field.key]: value })); }} />)}
+                  </div>
+                </div>
+              ))}
+              <p className="hint">{t("settings.themePreviewHint")}</p>
+            </div>
+          </Section>
+
+          <Section id="printing" icon="printer" title={t("settings.printing")} hint={t("settings.printingHint")}
+            footer={<button type="button" className="btn btn-primary" disabled={!changed(printKeys) || busy !== ""} onClick={() => void persist(printKeys)}>{t("common.saveChanges")}</button>}>
+            <div className="form-grid">
+              <label className="field"><span>{t("settings.autoPrint")}</span>
+                <select value={settings["print.autoPrint"] || "none"} onChange={(e) => set("print.autoPrint", e.target.value)}>
+                  <option value="none">{t("settings.autoPrint.none")}</option>
+                  <option value="intake">{t("print.kind.intake")}</option>
+                  <option value="label">{t("print.kind.label")}</option>
+                  <option value="receipt">{t("print.kind.receipt")}</option>
+                </select>
+                <small>{t("settings.autoPrintHint")}</small>
+              </label>
+              <label className="field"><span>{t("settings.labelSize")}</span>
+                <select value={settings["print.labelSize"] || defaultLabelSize} onChange={(e) => set("print.labelSize", e.target.value)}>
+                  {Object.entries(labelSizes).map(([key, size]) => <option key={key} value={key}>{size.label}</option>)}
+                </select>
+                <small>{t("settings.labelSizeHint")}</small>
+              </label>
+              <label className="field full"><span>{t("settings.terms")}</span><textarea rows={4} value={settings["print.terms"]} onChange={(e) => set("print.terms", e.target.value)} placeholder={t("settings.termsPlaceholder")} /><small>{t("settings.termsHint")}</small></label>
+            </div>
+          </Section>
+
+          <Section id="email" icon="mail" title={t("settings.emailSection")} hint={t("settings.emailHint")}
+            footer={<button type="button" className="btn btn-primary" disabled={!changed(["email.signature"]) || busy !== ""} onClick={() => void persist(["email.signature"])}>{t("common.saveChanges")}</button>}>
+            <label className="field"><span>{t("settings.signature")}</span><textarea rows={4} value={settings["email.signature"]} onChange={(e) => set("email.signature", e.target.value)} placeholder={[settings["office.companyName"], settings["office.phone"]].filter(Boolean).join("\n")} /></label>
+          </Section>
+
+          {teamFeatures && <Section id="team" icon="users" title={t("team.title")} hint={t("team.hint")}><TeamSection /></Section>}
+          </>}
+
+          <Section id="language" icon="globe" title={t("settings.language")} hint={t("settings.languageHint")}>
+            <div style={{ maxWidth: 320 }}><LanguageDropdown locale={locale} setLocale={setLocale} locales={locales} label={t("settings.language")} searchLabel={t("settings.searchLanguage")} /></div>
+          </Section>
+
+          {isAdmin && <Section id="data" icon="database" title={t("settings.data")} hint={t("settings.dataHint")}>
+            <div style={{ display: "grid", gap: 18 }}>
+              <div style={{ display: "grid", gap: 8 }}>
+                <h3>{t("settings.backup")}</h3><p className="hint">{t("settings.backupHint")}</p>
+                <div className="page-actions">
+                  <button type="button" className="btn" disabled={busy !== ""} onClick={() => void run("backup", nativeBackup)}>{busy === "backup" ? t("settings.backupRunning") : t("settings.createBackup")}</button>
+                  <label className="btn file-button">{busy === "restore" ? t("settings.restoreRunning") : t("settings.restoreBackup")}<input type="file" accept={isServerMode ? ".dump,application/octet-stream" : ".db,application/x-sqlite3,application/vnd.sqlite3"} disabled={busy !== ""} onChange={(e) => void restoreNative(e)} /></label>
+                </div>
+              </div>
+              <div style={{ display: "grid", gap: 8 }}>
+                <h3>{t("settings.portableTitle")}</h3><p className="hint">{t("settings.portableHint")}</p>
+                <div className="page-actions">
+                  <button type="button" className="btn" disabled={busy !== ""} onClick={() => void run("portable", exportPortableBackup)}>{busy === "portable" ? t("settings.portableExporting") : t("settings.portableCreate")}</button>
+                  <label className="btn file-button">{busy === "portable-restore" ? t("settings.portableRestoring") : t("settings.portableRestore")}<input type="file" accept=".dbrepairs,application/json" disabled={busy !== ""} onChange={(e) => void restorePortable(e)} /></label>
+                </div>
+              </div>
+              <div style={{ display: "grid", gap: 8 }}>
+                <h3>{t("settings.export")}</h3><p className="hint">{t("settings.exportHint")}</p>
+                <div className="page-actions">
+                  <button type="button" className="btn" disabled={busy !== ""} onClick={() => void exportCsv("customers")}>{t("settings.exportCustomers")}</button>
+                  <button type="button" className="btn" disabled={busy !== ""} onClick={() => void exportCsv("repairs")}>{t("settings.exportRepairs")}</button>
+                </div>
+              </div>
+            </div>
+          </Section>}
         </div>
-        {backupPath&&<div className="backup-success"><strong>{t("settings.backupCreated")}</strong><code>{backupPath}</code></div>}
-      </section>
-      <section className="panel settings-panel portable-panel">
-        <div className="panel-head">
-          <div><h2>{t("settings.portableTitle")}</h2><p>{t("settings.portableHint")}</p></div>
-          <div className="export-actions">
-            <button type="button" className="secondary" disabled={Boolean(portableRunning)||backupRunning||restoreRunning} onClick={()=>void createPortable()}>
-              {portableRunning==="export"?t("settings.portableExporting"):t("settings.portableCreate")}
-            </button>
-            <label className={`secondary file-button ${portableRunning?"disabled":""}`}>
-              {portableRunning==="restore"?t("settings.portableRestoring"):t("settings.portableRestore")}
-              <input type="file" accept=".dbrepairs,application/json" disabled={Boolean(portableRunning)||backupRunning||restoreRunning} onChange={restorePortable}/>
-            </label>
-          </div>
-        </div>
-        {portablePath&&<div className="backup-success"><strong>{t("settings.portableCreated")}</strong><code>{portablePath}</code></div>}
-      </section>
-      <section className="panel settings-panel">
-        <div className="panel-head">
-          <div><h2>{t("settings.export")}</h2><p>{t("settings.exportHint")}</p></div>
-          <div className="export-actions">
-            <button type="button" className="secondary" disabled={Boolean(exportRunning)} onClick={()=>void exportCustomers()}>
-              {exportRunning==="customers"?t("settings.exportRunning"):t("settings.exportCustomers")}
-            </button>
-            <button type="button" className="secondary" disabled={Boolean(exportRunning)} onClick={()=>void exportRepairs()}>
-              {exportRunning==="repairs"?t("settings.exportRunning"):t("settings.exportRepairs")}
-            </button>
-          </div>
-        </div>
-        {exportPath&&<div className="backup-success"><strong>{t("settings.exportCreated")}</strong><code>{exportPath}</code></div>}
-      </section>
-      <section className="panel settings-panel">
-        <div className="panel-head"><div><h2>{t("settings.office")}</h2><p>{t("settings.officeHint")}</p></div></div>
-        <div className="office-settings-grid">
-          <div className="logo-setting">
-            <div className="logo-preview">{form.logoDataUrl?<img src={form.logoDataUrl} alt=""/>:<img src="/dbrepairs-icon.png" alt=""/>}</div>
-            <div className="logo-actions"><label className="secondary file-button">{t("settings.chooseLogo")}<input type="file" accept="image/png,image/jpeg,image/webp" onChange={chooseLogo}/></label>{form.logoDataUrl&&<button type="button" className="danger-link" onClick={()=>set("logoDataUrl","")}>{t("settings.removeLogo")}</button>}<small>{t("settings.logoHint")}</small></div>
-          </div>
-          <div className="form-grid">
-            <label className="field full"><span>{t("settings.companyName")}</span><input value={form.companyName} onChange={e=>set("companyName",e.target.value)}/></label>
-            <label className="field"><span>{t("settings.taxNumber")}</span><input value={form.taxNumber} onChange={e=>set("taxNumber",e.target.value)}/></label>
-            <label className="field"><span>{t("settings.phone")}</span><input value={form.phone} onChange={e=>set("phone",e.target.value)}/></label>
-            <label className="field full"><span>{t("settings.address")}</span><input value={form.address} onChange={e=>set("address",e.target.value)}/></label>
-            <label className="field full"><span>{t("settings.email")}</span><input type="email" value={form.email} onChange={e=>set("email",e.target.value)}/></label>
-          </div>
-        </div>
-        <div className="settings-actions"><button className="primary" disabled={saving}>{saving?t("common.saving"):t("common.save")}</button></div>
-      </section>
-    </form>
-  </>;
+      </div>
+    </div>
+  );
+}
+
+function ThemeInput({ field, value, label, customLabel, onChange }: { field: ThemeField; value: string; label: string; customLabel: string; onChange: (value: string) => void }) {
+  if (field.kind === "color") {
+    const hex = /^#[0-9a-f]{6}$/i.test(value) ? value : "#000000";
+    return (
+      <div className="color-field">
+        <input type="color" value={hex} onChange={(e) => onChange(e.target.value)} aria-label={label} />
+        <label>{label}<input className="input" value={value} onChange={(e) => onChange(e.target.value)} spellCheck={false} /></label>
+      </div>
+    );
+  }
+  if (field.kind === "radius") {
+    return <label className="field"><span>{label}</span><select value={value} onChange={(e) => onChange(e.target.value)}>{radiusOptions.map((r) => <option key={r} value={r}>{r}</option>)}</select></label>;
+  }
+  const known = fontOptions.some((option) => option.value === value);
+  const [custom, setCustom] = useState(!known);
+  return (
+    <label className="field"><span>{label}</span>
+      <select value={known && !custom ? value : "custom"} onChange={(e) => { const next = e.target.value; setCustom(next === "custom"); if (next !== "custom") onChange(next); }}>
+        {fontOptions.map((option) => <option key={option.label} value={option.value}>{option.label}</option>)}
+        <option value="custom">{customLabel}</option>
+      </select>
+      {(custom || !known) && <input className="input" value={value} onChange={(e) => onChange(e.target.value)} spellCheck={false} />}
+      <small style={{ fontFamily: value }}>The quick brown fox · 0123456789</small>
+    </label>
+  );
 }

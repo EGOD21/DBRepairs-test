@@ -2,11 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { buildApp } from "../src/app.js";
 import { createSessionKey } from "../src/auth.js";
+import { hashPassword } from "../src/users.js";
 
 const password = "counter-password";
+const adminRow = { id: 1, username: "admin", display_name: "Admin", role: "admin", active: true, session_version: 1, password_hash: await hashPassword(password) };
 
 function testApp() {
-  const pool = { query: async () => ({ rows: [{ "?column?": 1 }] }) };
+  // Answers the user lookups the sign-in code makes; everything else gets a dummy row.
+  const pool = { query: async (sql) => (/FROM users/.test(sql) ? { rows: [adminRow] } : { rows: [{ "?column?": 1 }] }) };
   return buildApp({
     pool,
     config: {
@@ -19,8 +22,9 @@ function testApp() {
 }
 
 async function login(app) {
-  const response = await app.inject({ method: "POST", url: "/api/login", payload: { password } });
-  assert.equal(response.statusCode, 204);
+  const response = await app.inject({ method: "POST", url: "/api/login", payload: { username: "admin", password } });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().user.username, "admin");
   const cookie = response.headers["set-cookie"];
   assert.match(cookie, /HttpOnly/);
   assert.match(cookie, /SameSite=Strict/);
@@ -50,11 +54,11 @@ test("data and backup endpoints require signing in", async (t) => {
 test("a wrong password is rejected and repeated failures are throttled", async (t) => {
   const app = testApp();
   t.after(() => app.close());
-  const wrong = await app.inject({ method: "POST", url: "/api/login", payload: { password: "nope" } });
+  const wrong = await app.inject({ method: "POST", url: "/api/login", payload: { username: "admin", password: "nope" } });
   assert.equal(wrong.statusCode, 401);
   assert.equal(wrong.headers["set-cookie"], undefined);
-  for (let i = 0; i < 9; i += 1) await app.inject({ method: "POST", url: "/api/login", payload: { password: "nope" } });
-  const blocked = await app.inject({ method: "POST", url: "/api/login", payload: { password } });
+  for (let i = 0; i < 9; i += 1) await app.inject({ method: "POST", url: "/api/login", payload: { username: "admin", password: "nope" } });
+  const blocked = await app.inject({ method: "POST", url: "/api/login", payload: { username: "admin", password } });
   assert.equal(blocked.statusCode, 429);
 });
 
@@ -63,7 +67,8 @@ test("signing in grants access and signing out removes it", async (t) => {
   t.after(() => app.close());
   const cookie = await login(app);
   const session = await app.inject({ method: "GET", url: "/api/session", headers: { cookie } });
-  assert.deepEqual(session.json(), { authenticated: true });
+  assert.equal(session.json().authenticated, true);
+  assert.equal(session.json().user.role, "admin");
   const customers = await app.inject({ method: "GET", url: "/api/customers", headers: { cookie } });
   assert.equal(customers.statusCode, 200);
   const logout = await app.inject({ method: "POST", url: "/api/logout", headers: { cookie } });
@@ -99,4 +104,13 @@ test("restore rejects files that are not PostgreSQL dumps", async (t) => {
   });
   assert.equal(response.statusCode, 400);
   assert.match(response.json().error, /Invalid PostgreSQL backup/);
+});
+
+test("branding is public so the sign-in page can show the logo, but settings are not", async (t) => {
+  const app = testApp();
+  t.after(() => app.close());
+  const branding = await app.inject({ method: "GET", url: "/api/branding" });
+  assert.equal(branding.statusCode, 200);
+  const settings = await app.inject({ method: "GET", url: "/api/settings" });
+  assert.equal(settings.statusCode, 401);
 });

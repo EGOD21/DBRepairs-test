@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import pg from "pg";
 
 pg.types.setTypeParser(20, Number);
+// Keep DATE columns as "YYYY-MM-DD" text so they never shift with time zones.
+pg.types.setTypeParser(1082, (value) => value);
 
 const migrationsDirectory = join(dirname(fileURLToPath(import.meta.url)), "..", "migrations");
 
