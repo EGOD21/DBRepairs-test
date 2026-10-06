@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "./database";
 import { api } from "./api";
 import { isServerMode } from "./runtime";
@@ -75,9 +76,16 @@ export async function listRepairStatusHistory(repairId: number): Promise<RepairS
     WHERE h.repair_id=? ORDER BY h.id DESC`, [repairId]);
 }
 
-function repairNumber(id: number) {
-  const year = new Date().getFullYear();
-  return `${year}-${String(id).padStart(6,"0")}`;
+function money(value: string) {
+  return value.trim() === "" ? null : Number(value);
+}
+
+function desktopFields(input: RepairInput | RepairUpdateInput) {
+  return {
+    ...input,
+    estimated_value: money(input.estimated_value),
+    final_value: "final_value" in input ? money(input.final_value) : null,
+  };
 }
 
 export async function createRepair(input: RepairInput): Promise<number> {
@@ -85,30 +93,10 @@ export async function createRepair(input: RepairInput): Promise<number> {
     const result = await api<{ id: number }>("/repairs", { method: "POST", body: JSON.stringify(input) });
     return result.id;
   }
-  const db = await getDatabase();
-  const temp = `TMP-${Date.now()}`;
-  const result = await db.execute(`INSERT INTO repairs
-    (repair_number,customer_id,status_id,device_type,brand,model,serial_number,imei,reported_fault,accessories,general_condition,estimated_value,internal_notes)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, [temp,input.customer_id,input.status_id,input.device_type||null,input.brand||null,input.model||null,input.serial_number||null,input.imei||null,input.reported_fault||null,input.accessories||null,input.general_condition||null,input.estimated_value?Number(input.estimated_value):null,input.internal_notes||null]);
-  const id = Number(result.lastInsertId);
-  await db.execute("UPDATE repairs SET repair_number=? WHERE id=?", [repairNumber(id), id]);
-  await db.execute("INSERT INTO repair_status_history (repair_id,status_id) VALUES (?,?)", [id,input.status_id]);
-  return id;
+  return invoke<number>("create_repair", { repair: desktopFields(input) });
 }
 
 export async function updateRepair(id: number, input: RepairUpdateInput, previousStatusId: number, statusNote = ""): Promise<void> {
   if (isServerMode) return api(`/repairs/${id}`, { method: "PUT", body: JSON.stringify({ ...input, previousStatusId, statusNote }) });
-  const db = await getDatabase();
-  await db.execute(`UPDATE repairs SET
-    customer_id=?, status_id=?, device_type=?, brand=?, model=?, serial_number=?, imei=?, reported_fault=?, accessories=?, general_condition=?,
-    diagnosis=?, work_performed=?, estimated_value=?, final_value=?, internal_notes=?, updated_at=CURRENT_TIMESTAMP,
-    closed_at=CASE WHEN (SELECT code FROM repair_statuses WHERE id=?) IN ('DELIVERED','CANCELLED') THEN COALESCE(closed_at,CURRENT_TIMESTAMP) ELSE NULL END
-    WHERE id=?`, [
-      input.customer_id,input.status_id,input.device_type||null,input.brand||null,input.model||null,input.serial_number||null,input.imei||null,
-      input.reported_fault||null,input.accessories||null,input.general_condition||null,input.diagnosis||null,input.work_performed||null,
-      input.estimated_value?Number(input.estimated_value):null,input.final_value?Number(input.final_value):null,input.internal_notes||null,input.status_id,id
-    ]);
-  if (input.status_id !== previousStatusId) {
-    await db.execute("INSERT INTO repair_status_history (repair_id,status_id,note) VALUES (?,?,?)", [id,input.status_id,statusNote.trim()||null]);
-  }
+  await invoke("update_repair", { id, repair: desktopFields(input), statusNote });
 }

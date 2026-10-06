@@ -10,8 +10,12 @@ import {
   listDashboardRecentRepairs,
 } from "./data/dashboard";
 import { useI18n } from "./i18n/I18nProvider";
+import LoginPage from "./pages/LoginPage";
+import { getSession, logout, unauthorizedEvent } from "./data/api";
+import { isServerMode } from "./data/runtime";
 
 type Page = "dashboard" | "repairs" | "customers" | "settings";
+type AuthState = "checking" | "signedOut" | "signedIn";
 
 const emptyStats: DashboardStats = {
   openRepairs: 0,
@@ -21,6 +25,28 @@ const emptyStats: DashboardStats = {
 };
 
 export default function App() {
+  const { t } = useI18n();
+  const [auth, setAuth] = useState<AuthState>(isServerMode ? "checking" : "signedIn");
+
+  useEffect(() => {
+    if (!isServerMode) return;
+    const signedOut = () => setAuth("signedOut");
+    window.addEventListener(unauthorizedEvent, signedOut);
+    getSession()
+      .then((authenticated) => setAuth(authenticated ? "signedIn" : "signedOut"))
+      .catch((error) => {
+        console.error("Session check failed:", error);
+        setAuth("signedOut");
+      });
+    return () => window.removeEventListener(unauthorizedEvent, signedOut);
+  }, []);
+
+  if (auth === "checking") return <div className="login-shell">{t("common.loading")}</div>;
+  if (auth === "signedOut") return <LoginPage onSignedIn={() => setAuth("signedIn")} />;
+  return <Workspace onSignOut={isServerMode ? () => void logout().finally(() => setAuth("signedOut")) : undefined} />;
+}
+
+function Workspace({ onSignOut }: { onSignOut?: () => void }) {
   const { t, locale, setLocale, locales } = useI18n();
   const [page, setPage] = useState<Page>("dashboard");
   const [dashboardStats, setDashboardStats] = useState<DashboardStats>(emptyStats);
@@ -77,14 +103,17 @@ export default function App() {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div className="brand"><img src="/dbrepairs-icon.png" alt="" /><div>DBRepairs <span>0.2</span></div></div>
+        <div className="brand"><img src="/dbrepairs-icon.png" alt="" /><div>DBRepairs <span>{__APP_VERSION__}</span></div></div>
         <nav>
           <button className={page === "dashboard" ? "active" : ""} onClick={() => setPage("dashboard")}>{t("nav.dashboard")}</button>
           <button className={page === "repairs" ? "active" : ""} onClick={() => setPage("repairs")}>{t("nav.repairs")}</button>
           <button className={page === "customers" ? "active" : ""} onClick={() => setPage("customers")}>{t("nav.customers")}</button>
           <button className={page === "settings" ? "active" : ""} onClick={() => setPage("settings")}>{t("nav.settings")}</button>
         </nav>
-        <div className="sidebar-language">{languageControl}</div>
+        <div className="sidebar-language">
+          {languageControl}
+          {onSignOut && <button type="button" className="sidebar-logout" onClick={onSignOut}>{t("auth.signOut")}</button>}
+        </div>
       </aside>
 
       <main>

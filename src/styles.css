@@ -215,3 +215,15 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 /* CSV export */
 .export-actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
 @media (max-width:700px) { .export-actions { width:100%; } .export-actions button { flex:1 1 100%; } }
+
+/* Server sign-in */
+.login-shell { min-height: 100vh; display: grid; place-items: center; padding: 20px; }
+.login-panel { width: min(400px, 100%); display: grid; gap: 16px; padding: 28px; }
+.login-panel h1 { margin-bottom: 0; font-size: 22px; }
+.login-panel > p { margin: -8px 0 0; }
+.login-brand { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 800; }
+.login-brand img { width: 34px; height: 34px; object-fit: contain; }
+.login-alert { margin: 0; }
+.login-language { padding-top: 4px; }
+.sidebar-logout { margin-top: 10px; width: 100%; border: 1px solid #374151; background: transparent; color: #cbd5e1; padding: 9px 10px; border-radius: 8px; cursor: pointer; }
+.sidebar-logout:hover { color: white; background: #1f2937; }

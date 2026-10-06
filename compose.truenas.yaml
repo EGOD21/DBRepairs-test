@@ -2,9 +2,15 @@
 # Create these datasets first:
 #   Apps/dbrepairs-postgres -> /mnt/Apps/dbrepairs-postgres
 #   Apps/dbrepairs-backups  -> /mnt/Apps/dbrepairs-backups
-# Replace the password below before installing.
+# Replace the three passwords below before installing. Use a different long,
+# random value for each. DBRepairs refuses to start while they still say CHANGE-THIS.
 
-x-db-password: &db-password "CHANGE-THIS-LONG-PASSWORD"
+# Database administrator. Only the one-time db-init step uses it.
+x-admin-password: &admin-password "CHANGE-THIS-ADMIN-PASSWORD"
+# Restricted database account used by the application and the backups.
+x-app-db-password: &app-db-password "CHANGE-THIS-APP-PASSWORD"
+# The password people type to sign in to DBRepairs in the browser.
+x-login-password: &login-password "CHANGE-THIS-LOGIN-PASSWORD"
 
 services:
   db:
@@ -13,7 +19,7 @@ services:
     environment:
       POSTGRES_DB: dbrepairs
       POSTGRES_USER: dbrepairs
-      POSTGRES_PASSWORD: *db-password
+      POSTGRES_PASSWORD: *admin-password
       TZ: Europe/Lisbon
     volumes:
       - /mnt/Apps/dbrepairs-postgres:/var/lib/postgresql/data
@@ -24,22 +30,54 @@ services:
       retries: 10
     networks: [internal]
 
-  api:
-    image: ghcr.io/claudiodb007/dbrepairs-api:latest
-    pull_policy: always
-    restart: unless-stopped
+  # Runs once at every start: creates the restricted database account the app
+  # uses, so a restored backup can never run commands as the database superuser.
+  db-init:
+    image: postgres:17-alpine
+    restart: "no"
     environment:
       PGHOST: db
       PGPORT: 5432
       PGDATABASE: dbrepairs
       PGUSER: dbrepairs
-      PGPASSWORD: *db-password
+      PGPASSWORD: *admin-password
+      APP_DB_USER: dbrepairs_app
+      APP_DB_PASSWORD: *app-db-password
+    depends_on:
+      db:
+        condition: service_healthy
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        psql -v ON_ERROR_STOP=1 -v app_user="$$APP_DB_USER" -v app_password="$$APP_DB_PASSWORD" <<'SQL'
+        SELECT format('CREATE ROLE %I LOGIN', :'app_user') WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = :'app_user') \gexec
+        SELECT format('ALTER ROLE %I WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L', :'app_user', :'app_password') \gexec
+        SELECT format('ALTER DATABASE %I OWNER TO %I', current_database(), :'app_user') \gexec
+        SELECT format('ALTER SCHEMA public OWNER TO %I', :'app_user') \gexec
+        SELECT format('ALTER TABLE public.%I OWNER TO %I', tablename, :'app_user') FROM pg_tables WHERE schemaname = 'public' \gexec
+        SQL
+    networks: [internal]
+
+  api:
+    # Built from your fork by .github/workflows/docker-publish.yml.
+    # To update, change the version number on both image lines.
+    image: ghcr.io/egod21/dbrepairs-api:0.3.0
+    restart: unless-stopped
+    environment:
+      PGHOST: db
+      PGPORT: 5432
+      PGDATABASE: dbrepairs
+      PGUSER: dbrepairs_app
+      PGPASSWORD: *app-db-password
+      DBREPAIRS_PASSWORD: *login-password
       DATABASE_POOL_SIZE: 10
       TZ: Europe/Lisbon
       TRUST_PROXY: "true"
     depends_on:
-      db:
-        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/api/health"]
       interval: 30s
@@ -49,8 +87,7 @@ services:
     networks: [internal]
 
   web:
-    image: ghcr.io/claudiodb007/dbrepairs-web:latest
-    pull_policy: always
+    image: ghcr.io/egod21/dbrepairs-web:0.3.0
     restart: unless-stopped
     ports:
       - "31500:8080"
@@ -66,8 +103,8 @@ services:
       PGHOST: db
       PGPORT: 5432
       PGDATABASE: dbrepairs
-      PGUSER: dbrepairs
-      PGPASSWORD: *db-password
+      PGUSER: dbrepairs_app
+      PGPASSWORD: *app-db-password
       BACKUP_INTERVAL_SECONDS: 86400
       BACKUP_RETENTION_DAYS: 14
       TZ: Europe/Lisbon

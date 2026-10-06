@@ -18,6 +18,36 @@ services:
       retries: 10
     networks: [internal]
 
+  # Runs once at every start: creates the restricted database account the app
+  # uses, so a restored backup can never run commands as the database superuser.
+  db-init:
+    image: postgres:17-alpine
+    restart: "no"
+    environment:
+      PGHOST: db
+      PGPORT: 5432
+      PGDATABASE: ${POSTGRES_DB:-dbrepairs}
+      PGUSER: ${POSTGRES_USER:-dbrepairs}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      APP_DB_USER: ${APP_DB_USER:-dbrepairs_app}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?Define APP_DB_PASSWORD in .env or Portainer}
+    depends_on:
+      db:
+        condition: service_healthy
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        psql -v ON_ERROR_STOP=1 -v app_user="$$APP_DB_USER" -v app_password="$$APP_DB_PASSWORD" <<'SQL'
+        SELECT format('CREATE ROLE %I LOGIN', :'app_user') WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = :'app_user') \gexec
+        SELECT format('ALTER ROLE %I WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L', :'app_user', :'app_password') \gexec
+        SELECT format('ALTER DATABASE %I OWNER TO %I', current_database(), :'app_user') \gexec
+        SELECT format('ALTER SCHEMA public OWNER TO %I', :'app_user') \gexec
+        SELECT format('ALTER TABLE public.%I OWNER TO %I', tablename, :'app_user') FROM pg_tables WHERE schemaname = 'public' \gexec
+        SQL
+    networks: [internal]
+
   api:
     build:
       context: ./server
@@ -26,14 +56,15 @@ services:
       PGHOST: db
       PGPORT: 5432
       PGDATABASE: ${POSTGRES_DB:-dbrepairs}
-      PGUSER: ${POSTGRES_USER:-dbrepairs}
-      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGUSER: ${APP_DB_USER:-dbrepairs_app}
+      PGPASSWORD: ${APP_DB_PASSWORD}
+      DBREPAIRS_PASSWORD: ${DBREPAIRS_PASSWORD:?Define DBREPAIRS_PASSWORD (the login password) in .env or Portainer}
       DATABASE_POOL_SIZE: ${DATABASE_POOL_SIZE:-10}
       TZ: ${TZ:-Europe/Lisbon}
       TRUST_PROXY: "true"
     depends_on:
-      db:
-        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/api/health"]
       interval: 30s
@@ -60,8 +91,8 @@ services:
       PGHOST: db
       PGPORT: 5432
       PGDATABASE: ${POSTGRES_DB:-dbrepairs}
-      PGUSER: ${POSTGRES_USER:-dbrepairs}
-      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGUSER: ${APP_DB_USER:-dbrepairs_app}
+      PGPASSWORD: ${APP_DB_PASSWORD}
       BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
       TZ: ${TZ:-Europe/Lisbon}

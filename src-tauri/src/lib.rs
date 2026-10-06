@@ -1,13 +1,29 @@
-use std::{fs, path::Path, time::{SystemTime, UNIX_EPOCH}};
+use std::{fs, path::{Path, PathBuf}, time::{Duration, SystemTime, UNIX_EPOCH}};
 use tauri::Manager;
 use tauri_plugin_sql::{Migration, MigrationKind};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::Deserialize;
 
 
 const SQLITE_HEADER: &[u8; 16] = b"SQLite format 3\0";
 fn is_sqlite_database(data: &[u8]) -> bool { data.len() >= 16 && &data[..16] == SQLITE_HEADER }
 fn remove_if_exists(path: &Path) -> Result<(), String> { if path.exists(){fs::remove_file(path).map_err(|e|e.to_string())?;} Ok(()) }
+fn database_path(app: &tauri::AppHandle) -> Result<PathBuf, String> { Ok(app.path().app_config_dir().map_err(|e|e.to_string())?.join("dbrepairs.db")) }
+fn open_database(app: &tauri::AppHandle) -> Result<Connection, String> {
+    let path=database_path(app)?; if !path.exists(){return Err("Database file not found".into());}
+    let connection=Connection::open(path).map_err(|e|e.to_string())?;
+    connection.busy_timeout(Duration::from_secs(5)).map_err(|e|e.to_string())?;
+    connection.pragma_update(None, "foreign_keys", true).map_err(|e|e.to_string())?;
+    Ok(connection)
+}
+// VACUUM INTO writes a consistent copy even while the app has the database open.
+fn snapshot_database(source: &Path, destination: &Path) -> Result<(), String> {
+    let connection=Connection::open(source).map_err(|e|e.to_string())?;
+    connection.busy_timeout(Duration::from_secs(5)).map_err(|e|e.to_string())?;
+    remove_if_exists(destination)?;
+    connection.execute("VACUUM INTO ?1", params![destination.to_string_lossy()]).map_err(|e|e.to_string())?; Ok(())
+}
+fn unix_stamp() -> Result<u64, String> { Ok(SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e|e.to_string())?.as_secs()) }
 fn apply_pending_restore(app: &tauri::AppHandle) -> Result<(), String> {
     let dir=app.path().app_config_dir().map_err(|e|e.to_string())?;
     let db=dir.join("dbrepairs.db"); let pending=dir.join("dbrepairs.restore.pending");
@@ -22,12 +38,7 @@ fn apply_pending_restore(app: &tauri::AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 fn backup_database(app: tauri::AppHandle) -> Result<String, String> {
-    let source = app
-        .path()
-        .app_config_dir()
-        .map_err(|e| e.to_string())?
-        .join("dbrepairs.db");
-
+    let source = database_path(&app)?;
     if !source.exists() {
         return Err("Database file not found".into());
     }
@@ -35,27 +46,22 @@ fn backup_database(app: tauri::AppHandle) -> Result<String, String> {
     let downloads = app.path().download_dir().map_err(|e| e.to_string())?;
     fs::create_dir_all(&downloads).map_err(|e| e.to_string())?;
 
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|e| e.to_string())?
-        .as_secs();
-
-    let destination = downloads.join(format!("DBRepairs-backup-{stamp}.db"));
-    fs::copy(&source, &destination).map_err(|e| e.to_string())?;
+    let destination = downloads.join(format!("DBRepairs-backup-{}.db", unix_stamp()?));
+    snapshot_database(&source, &destination)?;
 
     Ok(destination.to_string_lossy().into_owned())
 }
 
-
+// The frontend sends the file as a raw byte body; JSON would turn every byte into a number.
 #[tauri::command]
-fn restore_database(app: tauri::AppHandle, data: Vec<u8>) -> Result<(), String> {
-    if !is_sqlite_database(&data){return Err("Selected file is not a valid SQLite database".into());}
+fn restore_database(app: tauri::AppHandle, request: tauri::ipc::Request<'_>) -> Result<(), String> {
+    let tauri::ipc::InvokeBody::Raw(data) = request.body() else { return Err("Expected the database file as raw bytes".into()); };
+    if !is_sqlite_database(data){return Err("Selected file is not a valid SQLite database".into());}
     let dir=app.path().app_config_dir().map_err(|e|e.to_string())?; fs::create_dir_all(&dir).map_err(|e|e.to_string())?;
     let db=dir.join("dbrepairs.db"); if !db.exists(){return Err("Current database file not found".into());}
     let downloads=app.path().download_dir().map_err(|e|e.to_string())?; fs::create_dir_all(&downloads).map_err(|e|e.to_string())?;
-    let stamp=SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e|e.to_string())?.as_secs();
-    fs::copy(&db,downloads.join(format!("DBRepairs-before-restore-{stamp}.db"))).map_err(|e|e.to_string())?;
-    fs::write(dir.join("dbrepairs.restore.pending"),&data).map_err(|e|e.to_string())?;
+    snapshot_database(&db,&downloads.join(format!("DBRepairs-before-restore-{}.db", unix_stamp()?)))?;
+    fs::write(dir.join("dbrepairs.restore.pending"),data).map_err(|e|e.to_string())?;
     if cfg!(debug_assertions) {
         app.exit(0);
         Ok(())
@@ -66,7 +72,7 @@ fn restore_database(app: tauri::AppHandle, data: Vec<u8>) -> Result<(), String> 
 
 #[tauri::command]
 fn export_text_file(app: tauri::AppHandle, filename: String, content: String) -> Result<String, String> {
-    if filename.trim().is_empty() || filename.contains('/') || filename.contains('\\') {
+    if !is_safe_filename(&filename) {
         return Err("Invalid filename".into());
     }
 
@@ -77,6 +83,74 @@ fn export_text_file(app: tauri::AppHandle, filename: String, content: String) ->
     fs::write(&destination, content.as_bytes()).map_err(|e| e.to_string())?;
 
     Ok(destination.to_string_lossy().into_owned())
+}
+
+// Plain names only: no folders, drive letters (C:) or hidden files.
+fn is_safe_filename(name: &str) -> bool {
+    !name.is_empty() && name.len() <= 200 && !name.starts_with('.')
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+}
+
+#[derive(Deserialize)]
+struct RepairFields {
+    customer_id: i64, status_id: i64, device_type: Option<String>, brand: Option<String>, model: Option<String>,
+    serial_number: Option<String>, imei: Option<String>, reported_fault: Option<String>, accessories: Option<String>,
+    general_condition: Option<String>, estimated_value: Option<f64>, internal_notes: Option<String>,
+    diagnosis: Option<String>, work_performed: Option<String>, final_value: Option<f64>,
+}
+
+fn clean_text(value: Option<String>) -> Option<String> { value.map(|v| v.trim().to_string()).filter(|v| !v.is_empty()) }
+
+impl RepairFields {
+    fn validated(mut self) -> Result<Self, String> {
+        if self.customer_id < 1 || self.status_id < 1 { return Err("A customer and a status are required".into()); }
+        for value in [self.estimated_value, self.final_value].into_iter().flatten() {
+            if !value.is_finite() || value < 0.0 { return Err("Values must be positive numbers".into()); }
+        }
+        self.device_type=clean_text(self.device_type); self.brand=clean_text(self.brand); self.model=clean_text(self.model);
+        self.serial_number=clean_text(self.serial_number); self.imei=clean_text(self.imei); self.reported_fault=clean_text(self.reported_fault);
+        self.accessories=clean_text(self.accessories); self.general_condition=clean_text(self.general_condition);
+        self.internal_notes=clean_text(self.internal_notes); self.diagnosis=clean_text(self.diagnosis); self.work_performed=clean_text(self.work_performed);
+        if self.reported_fault.is_none() { return Err("The reported fault is required".into()); }
+        Ok(self)
+    }
+}
+
+// The repair, its number and its first history entry are saved together or not at all.
+fn create_repair_record(connection: &mut Connection, repair: RepairFields) -> Result<i64, String> {
+    let r = repair.validated()?;
+    let transaction = connection.transaction().map_err(|e|e.to_string())?;
+    transaction.execute("INSERT INTO repairs (repair_number,customer_id,status_id,device_type,brand,model,serial_number,imei,reported_fault,accessories,general_condition,estimated_value,internal_notes) VALUES ('TMP-'||lower(hex(randomblob(16))),?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+        params![r.customer_id,r.status_id,r.device_type,r.brand,r.model,r.serial_number,r.imei,r.reported_fault,r.accessories,r.general_condition,r.estimated_value,r.internal_notes]).map_err(|e|e.to_string())?;
+    let id = transaction.last_insert_rowid();
+    transaction.execute("UPDATE repairs SET repair_number=strftime('%Y',opened_at,'localtime')||'-'||printf('%06d',id) WHERE id=?1", params![id]).map_err(|e|e.to_string())?;
+    transaction.execute("INSERT INTO repair_status_history (repair_id,status_id) VALUES (?1,?2)", params![id,r.status_id]).map_err(|e|e.to_string())?;
+    transaction.commit().map_err(|e|e.to_string())?;
+    Ok(id)
+}
+
+// The repair update and its status history entry are saved together or not at all.
+fn update_repair_record(connection: &mut Connection, id: i64, repair: RepairFields, status_note: Option<String>) -> Result<(), String> {
+    let r = repair.validated()?;
+    let transaction = connection.transaction().map_err(|e|e.to_string())?;
+    let previous: Option<i64> = transaction.query_row("SELECT status_id FROM repairs WHERE id=?1", params![id], |row| row.get(0)).optional().map_err(|e|e.to_string())?;
+    let Some(previous_status) = previous else { return Err("Repair not found".into()); };
+    transaction.execute("UPDATE repairs SET customer_id=?1, status_id=?2, device_type=?3, brand=?4, model=?5, serial_number=?6, imei=?7, reported_fault=?8, accessories=?9, general_condition=?10, diagnosis=?11, work_performed=?12, estimated_value=?13, final_value=?14, internal_notes=?15, updated_at=CURRENT_TIMESTAMP, closed_at=CASE WHEN (SELECT code FROM repair_statuses WHERE id=?2) IN ('DELIVERED','CANCELLED') THEN COALESCE(closed_at,CURRENT_TIMESTAMP) ELSE NULL END WHERE id=?16",
+        params![r.customer_id,r.status_id,r.device_type,r.brand,r.model,r.serial_number,r.imei,r.reported_fault,r.accessories,r.general_condition,r.diagnosis,r.work_performed,r.estimated_value,r.final_value,r.internal_notes,id]).map_err(|e|e.to_string())?;
+    if previous_status != r.status_id {
+        transaction.execute("INSERT INTO repair_status_history (repair_id,status_id,note) VALUES (?1,?2,?3)", params![id,r.status_id,clean_text(status_note)]).map_err(|e|e.to_string())?;
+    }
+    transaction.commit().map_err(|e|e.to_string())
+}
+
+#[tauri::command]
+fn create_repair(app: tauri::AppHandle, repair: RepairFields) -> Result<i64, String> {
+    create_repair_record(&mut open_database(&app)?, repair)
+}
+
+#[tauri::command]
+fn update_repair(app: tauri::AppHandle, id: i64, repair: RepairFields, status_note: Option<String>) -> Result<(), String> {
+    update_repair_record(&mut open_database(&app)?, id, repair, status_note)
 }
 
 #[derive(Deserialize)]
@@ -105,10 +179,7 @@ fn restore_portable_database(app: tauri::AppHandle, archive: PortableArchive) ->
     if archive.format != "dbrepairs-portable" || archive.version != 1 || archive.data.statuses.is_empty() {
         return Err("Unsupported or incomplete DBRepairs portable backup".into());
     }
-    let path = app.path().app_config_dir().map_err(|e|e.to_string())?.join("dbrepairs.db");
-    if !path.exists() { return Err("Database file not found".into()); }
-    let mut connection = Connection::open(path).map_err(|e|e.to_string())?;
-    restore_portable_connection(&mut connection, archive)
+    restore_portable_connection(&mut open_database(&app)?, archive)
 }
 
 fn restore_portable_connection(connection: &mut Connection, archive: PortableArchive) -> Result<(), String> {
@@ -158,6 +229,80 @@ mod tests {
         connection.execute("INSERT INTO customers (name) VALUES ('Next')", []).unwrap();
         assert_eq!(connection.query_row("SELECT MAX(id) FROM customers", [], |row| row.get::<_,i64>(0)).unwrap(), 8);
     }
+
+    fn repair_fields(status_id: i64) -> RepairFields {
+        RepairFields { customer_id:1, status_id, device_type:Some(" Laptop ".into()), brand:Some("".into()), model:None, serial_number:None, imei:None,
+            reported_fault:Some("No power".into()), accessories:None, general_condition:None, estimated_value:Some(40.0), internal_notes:None,
+            diagnosis:None, work_performed:None, final_value:None }
+    }
+
+    fn test_database() -> Connection {
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch(include_str!("../migrations/0001_initial.sql")).unwrap();
+        connection.execute("INSERT INTO customers (name) VALUES ('Ana')", []).unwrap();
+        connection
+    }
+
+    fn count(connection: &Connection, sql: &str) -> i64 { connection.query_row(sql, [], |row| row.get(0)).unwrap() }
+
+    #[test]
+    fn create_repair_saves_number_and_history_together() {
+        let mut connection = test_database();
+        let id = create_repair_record(&mut connection, repair_fields(1)).unwrap();
+        let (number, device, brand): (String, Option<String>, Option<String>) = connection.query_row("SELECT repair_number, device_type, brand FROM repairs WHERE id=?1", params![id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap();
+        assert!(number.ends_with(&format!("-{id:06}")) && number.len() == 11, "unexpected number {number}");
+        assert_eq!(device.as_deref(), Some("Laptop"));
+        assert_eq!(brand, None);
+        assert_eq!(count(&connection, "SELECT COUNT(*) FROM repair_status_history"), 1);
+    }
+
+    #[test]
+    fn create_repair_leaves_nothing_behind_when_it_fails() {
+        let mut connection = test_database();
+        let mut fields = repair_fields(1);
+        fields.customer_id = 999;
+        assert!(create_repair_record(&mut connection, fields).is_err());
+        assert_eq!(count(&connection, "SELECT COUNT(*) FROM repairs"), 0);
+        assert_eq!(count(&connection, "SELECT COUNT(*) FROM repair_status_history"), 0);
+        let mut negative = repair_fields(1);
+        negative.estimated_value = Some(-1.0);
+        assert!(create_repair_record(&mut connection, negative).is_err());
+    }
+
+    #[test]
+    fn update_repair_records_status_changes_and_closes_repairs() {
+        let mut connection = test_database();
+        let id = create_repair_record(&mut connection, repair_fields(1)).unwrap();
+        let delivered = count(&connection, "SELECT id FROM repair_statuses WHERE code='DELIVERED'");
+        update_repair_record(&mut connection, id, repair_fields(delivered), Some(" Collected ".into())).unwrap();
+        assert_eq!(count(&connection, "SELECT COUNT(*) FROM repairs WHERE closed_at IS NOT NULL"), 1);
+        assert_eq!(connection.query_row("SELECT note FROM repair_status_history ORDER BY id DESC LIMIT 1", [], |row| row.get::<_,String>(0)).unwrap(), "Collected");
+        update_repair_record(&mut connection, id, repair_fields(delivered), None).unwrap();
+        assert_eq!(count(&connection, "SELECT COUNT(*) FROM repair_status_history"), 2);
+        assert!(update_repair_record(&mut connection, 999, repair_fields(1), None).is_err());
+    }
+
+    #[test]
+    fn snapshot_copies_a_database_file() {
+        let dir = std::env::temp_dir().join(format!("dbrepairs-test-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("source.db");
+        let destination = dir.join("copy.db");
+        let connection = Connection::open(&source).unwrap();
+        connection.execute_batch("CREATE TABLE t(x); INSERT INTO t VALUES (42);").unwrap();
+        snapshot_database(&source, &destination).unwrap();
+        assert!(is_sqlite_database(&fs::read(&destination).unwrap()));
+        assert_eq!(count(&Connection::open(&destination).unwrap(), "SELECT x FROM t"), 42);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn export_filenames_must_be_plain_names() {
+        assert!(is_safe_filename("DBRepairs-clientes.csv"));
+        for name in ["", "../x.csv", "a/b.csv", "a\\b.csv", "C:evil.csv", ".hidden", "name with space.csv"] {
+            assert!(!is_safe_filename(name), "{name} should be rejected");
+        }
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -175,7 +320,7 @@ pub fn run() {
                 .add_migrations("sqlite:dbrepairs.db", migrations)
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![backup_database, restore_database, export_text_file, restore_portable_database])
+        .invoke_handler(tauri::generate_handler![backup_database, restore_database, export_text_file, restore_portable_database, create_repair, update_repair])
         .setup(|app| {
             apply_pending_restore(app.handle()).map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
             Ok(())

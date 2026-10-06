@@ -111,13 +111,15 @@ export default function SettingsPage(){
       if(header!=="SQLite format 3\0"){setError(t("settings.restoreInvalid"));return;}
       const db=await getDatabase();
       await db.execute("PRAGMA wal_checkpoint(FULL)");
-      await invoke("restore_database",{data:Array.from(bytes)});
+      await invoke("restore_database",bytes);
     }catch(cause){console.error(cause);setError(t("settings.restoreError"));}
     finally{setRestoreRunning(false);}
   }
 
   const csvCell=(value:unknown)=>{
-    const text=String(value??"");
+    let text=String(value??"");
+    // Spreadsheet apps run cells starting with these characters as formulas.
+    if(typeof value==="string"&&/^[=+\-@\t\r]/.test(text)) text=`'${text}`;
     return `"${text.replace(/"/g,'""')}"`;
   };
 

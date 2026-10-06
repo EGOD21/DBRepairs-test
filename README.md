@@ -73,6 +73,7 @@ Live overview with:
 ### Server edition
 
 - One central PostgreSQL database for simultaneous use from multiple computers.
+- Sign-in with a shared shop password.
 - Browser interface reusing the desktop workflow and translations.
 - Transactional HTTP API and automatic schema migrations.
 - Docker Compose stack for a server or Portainer.
@@ -97,7 +98,7 @@ Live overview with:
 Download the `.deb` package and install it with:
 
 ```bash
-sudo apt install ./DBRepairs_0.2.0_amd64.deb
+sudo apt install ./DBRepairs_0.3.0_amd64.deb
 ```
 
 ### Fedora / RHEL compatible distributions
@@ -105,7 +106,7 @@ sudo apt install ./DBRepairs_0.2.0_amd64.deb
 Download the `.rpm` package and install it with your distribution package manager, for example:
 
 ```bash
-sudo dnf install ./DBRepairs-0.2.0-1.x86_64.rpm
+sudo dnf install ./DBRepairs-0.3.0-1.x86_64.rpm
 ```
 
 ## Development
@@ -127,7 +128,7 @@ Native packages should normally be built on the target operating system or throu
 
 ### Server / Docker
 
-Copy `.env.example` to `.env`, set a strong `POSTGRES_PASSWORD`, then run:
+Copy `.env.example` to `.env`, replace the three passwords (`POSTGRES_PASSWORD`, `APP_DB_PASSWORD` and the sign-in password `DBREPAIRS_PASSWORD`), then run:
 
 ```bash
 docker compose up -d --build
