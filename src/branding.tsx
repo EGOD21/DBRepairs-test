@@ -43,10 +43,15 @@ export function BrandingProvider({ children }: { children: ReactNode }) {
   const companyName = branding["office.companyName"].trim() || "DBRepairs";
   const logo = branding["office.logoDataUrl"] || defaultLogo;
 
-  useEffect(() => { applyTheme(theme); }, [theme]);
+  useEffect(() => {
+    applyTheme(theme);
+    // Phones color their status bar to match the app's top bar.
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme.sidebar);
+  }, [theme]);
   useEffect(() => {
     setFavicon(logo);
     document.title = companyName;
+    document.querySelector('meta[name="apple-mobile-web-app-title"]')?.setAttribute("content", companyName);
   }, [logo, companyName]);
 
   return (

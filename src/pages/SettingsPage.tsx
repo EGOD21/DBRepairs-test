@@ -14,6 +14,7 @@ import { exportPortableBackup, importPortableBackup, parsePortableBackup } from 
 import { fontOptions, hubspotTheme, isSafeThemeValue, parseTheme, radiusOptions, Theme, ThemeField, themeFields, themePresets } from "../theme/theme";
 import { defaultLabelSize, labelSizes } from "../print/types";
 import { useSession } from "../session";
+import { emptyAppIcons, makeAppIcons } from "../lib/appIcons";
 import { MyAccountSection, TeamSection } from "../components/TeamSettings";
 
 type Notice = { tone: "success" | "error"; text: string } | null;
@@ -46,7 +47,15 @@ export default function SettingsPage() {
   const [busy, setBusy] = useState("");
 
   useEffect(() => {
-    getSettings().then((s) => { setSettings(s); setSaved(s); setTheme(parseTheme(s["ui.theme"])); }).catch(() => setNotice({ tone: "error", text: t("common.databaseError") }));
+    getSettings().then((s) => {
+      setSettings(s); setSaved(s); setTheme(parseTheme(s["ui.theme"]));
+      // Logos saved before app icons existed get their home-screen icons now.
+      if (isServerMode && isAdmin && s["office.logoDataUrl"] && !s["app.icon512"]) {
+        makeAppIcons(s["office.logoDataUrl"], parseTheme(s["ui.theme"]).surface)
+          .then((icons) => saveSettings(icons).then(() => setSaved((current) => ({ ...current, ...icons }))))
+          .catch((cause) => console.error("Could not create app icons:", cause));
+      }
+    }).catch(() => setNotice({ tone: "error", text: t("common.databaseError") }));
     return () => branding.previewTheme(null);
   }, []);
 
@@ -83,14 +92,19 @@ export default function SettingsPage() {
     if (file.size > 15 * 1024 * 1024) { setNotice({ tone: "error", text: t("settings.logoTooLarge") }); return; }
     try {
       const logo = await prepareLogo(file);
-      await persist(["office.logoDataUrl"], { "office.logoDataUrl": logo });
+      const icons = isServerMode ? await makeAppIcons(logo, savedTheme.surface) : null;
+      await persist(["office.logoDataUrl", ...(icons ? Object.keys(icons) as SettingKey[] : [])], { "office.logoDataUrl": logo, ...icons });
     } catch {
       setNotice({ tone: "error", text: t("settings.logoInvalid") });
     }
   }
 
   async function saveTheme() {
-    if (await persist(["ui.theme"], { "ui.theme": JSON.stringify(theme) })) branding.previewTheme(null);
+    // The icons' solid background follows the theme's card color.
+    const logo = saved["office.logoDataUrl"];
+    const icons = isServerMode && logo ? await makeAppIcons(logo, theme.surface).catch(() => null) : null;
+    const keys: SettingKey[] = ["ui.theme", ...(icons ? Object.keys(icons) as SettingKey[] : [])];
+    if (await persist(keys, { "ui.theme": JSON.stringify(theme), ...icons })) branding.previewTheme(null);
   }
 
   const businessKeys: SettingKey[] = ["office.companyName", "office.taxNumber", "office.address", "office.phone", "office.email", "office.website"];
@@ -210,7 +224,7 @@ export default function SettingsPage() {
                   <div className="logo-preview"><img src={branding.logo} alt="" /></div>
                   <div className="page-actions">
                     <label className="btn file-button"><Icon name="plus" size={15} />{t("settings.chooseLogo")}<input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => void chooseLogo(e)} /></label>
-                    {settings["office.logoDataUrl"] && <button type="button" className="btn btn-danger" onClick={() => void persist(["office.logoDataUrl"], { "office.logoDataUrl": "" })}>{t("settings.removeLogo")}</button>}
+                    {settings["office.logoDataUrl"] && <button type="button" className="btn btn-danger" onClick={() => void persist(["office.logoDataUrl", ...(isServerMode ? Object.keys(emptyAppIcons) as SettingKey[] : [])], { "office.logoDataUrl": "", ...emptyAppIcons })}>{t("settings.removeLogo")}</button>}
                   </div>
                   <small className="hint">{t("settings.logoHint")}</small>
                 </div>

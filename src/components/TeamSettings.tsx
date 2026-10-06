@@ -49,14 +49,14 @@ export function TeamSection() {
   return (
     <div style={{ display: "grid", gap: 14 }}>
       {message && <div className={`alert ${message.tone}`}>{message.text}</div>}
-      <div className="table-wrap card"><table>
+      <div className="table-wrap card"><table className="responsive">
         <thead><tr><th>{t("team.displayName")}</th><th>{t("auth.username")}</th><th>{t("team.role")}</th><th>{t("team.status")}</th><th></th></tr></thead>
         <tbody>{users.map((user) => (
           <tr key={user.id}>
-            <td><strong>{user.displayName}</strong>{user.id === me?.id && <span className="badge" style={{ marginLeft: 6 }}>{t("team.you")}</span>}</td>
-            <td className="muted">{user.username}</td>
-            <td><span className={`badge ${user.role === "admin" ? "primary" : ""}`}>{t(`team.role.${user.role}`)}</span></td>
-            <td>{user.active ? <span className="badge success">{t("team.active")}</span> : <span className="badge">{t("team.disabled")}</span>}</td>
+            <td data-label={t("team.displayName")} className="cell-title"><strong>{user.displayName}</strong>{user.id === me?.id && <span className="badge" style={{ marginLeft: 6 }}>{t("team.you")}</span>}</td>
+            <td data-label={t("auth.username")} className="muted">{user.username}</td>
+            <td data-label={t("team.role")}><span className={`badge ${user.role === "admin" ? "primary" : ""}`}>{t(`team.role.${user.role}`)}</span></td>
+            <td data-label={t("team.status")}>{user.active ? <span className="badge success">{t("team.active")}</span> : <span className="badge">{t("team.disabled")}</span>}</td>
             <td className="actions"><button type="button" className="btn btn-sm" onClick={() => edit(user)}><Icon name="pencil" size={14} />{t("common.edit")}</button></td>
           </tr>
         ))}</tbody>

@@ -54,6 +54,18 @@ Deploy the repository as a Git stack so that Portainer has the Dockerfiles and b
 
 After deployment, `db`, `api`, `web` and `backup` should be healthy or running. `db-init` runs once at each start and then shows as exited. That is normal.
 
+## Install on phones and tablets
+
+DBRepairs can be added to the home screen and opens like an app, full screen, with your logo as its icon. This needs HTTPS, which Tailscale Serve provides (`https://yourmachine.your-tailnet.ts.net`). Over plain `http://` the site still works in the browser, but it cannot be installed.
+
+- **iPhone / iPad (Safari):** open the link, tap **Share**, then **Add to Home Screen**.
+- **Android (Chrome):** open the link, tap the **⋮** menu, then **Install app** (or **Add to Home screen**).
+- **Computer (Chrome / Edge):** click the install icon at the right of the address bar.
+
+The icon comes from the logo in **Settings → Business**. Phones copy the icon when the app is installed: after changing the logo, remove the app from the home screen and add it again to see the new icon.
+
+Only the app's screens and styles are stored on the device. Customer and repair data always come from the server.
+
 ## TrueNAS SCALE 25.10
 
 The ready-to-paste configuration is `compose.truenas.yaml`. It uses port `31500` and the images that this repository's GitHub Actions workflow publishes to GitHub Container Registry (`ghcr.io/egod21/dbrepairs-api` and `ghcr.io/egod21/dbrepairs-web`).

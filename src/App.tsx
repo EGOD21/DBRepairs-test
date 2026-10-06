@@ -122,6 +122,14 @@ function Workspace({ onSignOut }: { onSignOut?: () => void }) {
           </button>
         </div>
       </aside>
+      {/* Phones: compact top bar with the logo, and tabs at the bottom (see styles.css). */}
+      <header className="mobile-topbar">
+        <a className="mobile-brand" href={href({ name: "dashboard" })}><img src={logo} alt="" /><strong className="truncate">{companyName}</strong></a>
+        <div className="mobile-topbar-actions">
+          <a className={`btn btn-ghost btn-icon${section === "settings" ? " active" : ""}`} href={href({ name: "settings" })} aria-label={t("nav.settings")}><Icon name="settings" /></a>
+          {onSignOut && <button type="button" className="btn btn-ghost btn-icon" onClick={onSignOut} aria-label={t("auth.signOut")}><Icon name="logout" /></button>}
+        </div>
+      </header>
       <main className="main">
         {route.name === "dashboard" && <DashboardPage />}
         {route.name === "repairs" && <RepairsPage filter={route.filter} />}
@@ -132,6 +140,14 @@ function Workspace({ onSignOut }: { onSignOut?: () => void }) {
         {route.name === "chat" && (teamFeatures ? <ChatPage /> : <DashboardPage />)}
         {route.name === "settings" && <SettingsPage />}
       </main>
+      <nav className="bottom-nav" aria-label={t("nav.main")}>
+        {links.filter((link) => link.route.name !== "settings").map((link) => (
+          <a key={link.route.name} href={href(link.route)} className={section === link.route.name ? "active" : ""} aria-current={section === link.route.name ? "page" : undefined}>
+            <span className="bottom-nav-icon"><Icon name={link.icon} size={22} />{link.badge ? <span className="bottom-nav-badge">{link.badge > 99 ? "99+" : link.badge}</span> : null}</span>
+            <span className="bottom-nav-label">{link.label}</span>
+          </a>
+        ))}
+      </nav>
     </div>
   );
 }

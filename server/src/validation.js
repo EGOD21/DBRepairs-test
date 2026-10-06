@@ -146,6 +146,11 @@ export const SETTING_LIMITS = {
   "office.email": 1000,
   "office.website": 1000,
   "office.logoDataUrl": 3_000_000,
+  // Home-screen icons drawn from the logo in the browser (see src/lib/appIcons.ts).
+  "app.icon192": 1_000_000,
+  "app.icon512": 3_000_000,
+  "app.iconMaskable": 3_000_000,
+  "app.iconApple": 1_000_000,
   "ui.theme": 20_000,
   "print.autoPrint": 50,
   "print.labelSize": 50,
@@ -174,6 +179,9 @@ export function settingsInput(value) {
     const cleaned = text(raw, key, { max }) || "";
     if (key === "office.logoDataUrl" && cleaned && !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(cleaned)) {
       throw new ValidationError("The logo must be a PNG, JPEG or WebP image");
+    }
+    if (key.startsWith("app.icon") && cleaned && !/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(cleaned)) {
+      throw new ValidationError("App icons must be PNG images");
     }
     if (key === "ui.theme" && cleaned) validateTheme(cleaned);
     result[key] = cleaned;

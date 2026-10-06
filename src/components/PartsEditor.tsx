@@ -69,17 +69,17 @@ export default function PartsEditor({ repairId, onChange }: { repairId: number; 
       </div>
       {error && <div className="card-body"><div className="alert error">{error}</div></div>}
       {parts.length === 0 && editing === null ? <div className="empty">{t("parts.emptyRepair")}</div> : parts.length > 0 && (
-        <div className="table-wrap"><table>
+        <div className="table-wrap"><table className="responsive">
           <thead><tr><th>{t("part.name")}</th><th>{t("part.quantity")}</th><th>{t("part.unitCost")}</th><th>{t("part.supplier")}</th><th>{t("part.status")}</th><th></th></tr></thead>
           <tbody>{parts.map((part) => {
             const link = safeLink(part.url);
             return (
               <tr key={part.id}>
-                <td><strong>{part.name}</strong>{part.part_number && <div className="muted" style={{ fontSize: 12 }}>#{part.part_number}</div>}{part.notes && <div className="muted" style={{ fontSize: 12 }}>{part.notes}</div>}</td>
-                <td>{part.quantity}</td>
-                <td className="nowrap">{formatMoney(part.unit_cost)}</td>
-                <td>{link ? <a href={link} target="_blank" rel="noopener noreferrer" className="nowrap">{part.supplier || t("part.orderLink")} <Icon name="external" size={13} className="inline-icon" /></a> : (part.supplier || "—")}</td>
-                <td>
+                <td data-label={t("part.name")} className="cell-title"><strong>{part.name}</strong>{part.part_number && <div className="muted" style={{ fontSize: 12 }}>#{part.part_number}</div>}{part.notes && <div className="muted" style={{ fontSize: 12 }}>{part.notes}</div>}</td>
+                <td data-label={t("part.quantity")}>{part.quantity}</td>
+                <td data-label={t("part.unitCost")} className="nowrap">{formatMoney(part.unit_cost)}</td>
+                <td data-label={t("part.supplier")}>{link ? <a href={link} target="_blank" rel="noopener noreferrer" className="nowrap">{part.supplier || t("part.orderLink")} <Icon name="external" size={13} className="inline-icon" /></a> : (part.supplier || "—")}</td>
+                <td data-label={t("part.status")}>
                   <select className="input" style={{ minHeight: 30, padding: "3px 8px", width: "auto" }} value={part.status} onChange={(e) => void quickStatus(part, e.target.value as Part["status"])} aria-label={t("part.status")}>
                     {partStatuses.map((s) => <option key={s} value={s}>{t(`part.status.${s}`)}</option>)}
                   </select>

@@ -50,21 +50,21 @@ export default function CustomersPage({ filter }: { filter?: string }) {
         {loading ? <div className="empty">{t("common.loading")}</div> : filtered.length === 0 ? (
           <div className="empty"><strong>{search || kind !== "all" ? t("customers.noResults") : t("customers.empty")}</strong>{!search && kind === "all" && <span>{t("customers.emptyHint")}</span>}</div>
         ) : (
-          <div className="table-wrap"><table>
+          <div className="table-wrap"><table className="responsive">
             <thead><tr><th>{t("customer.name")}</th><th>{t("customer.type")}</th><th>{t("customer.email")}</th><th>{t("customer.phone")}</th><th>{t("customers.repairs")}</th><th>{t("customers.billed")}</th></tr></thead>
             <tbody>{filtered.map((c) => {
               const phone = c.mobile || c.phone;
               return (
                 <tr key={c.id} className="clickable" onClick={() => navigate({ name: "customer", id: c.id })}>
-                  <td><strong><a href={href({ name: "customer", id: c.id })}>{c.name}</a></strong>{(c.company || c.contact_person) && <div className="muted" style={{ fontSize: 12 }}>{c.customer_type === "commercial" ? c.contact_person : c.company}</div>}</td>
-                  <td><div className="title-row">
+                  <td data-label={t("customer.name")} className="cell-title"><strong><a href={href({ name: "customer", id: c.id })}>{c.name}</a></strong>{(c.company || c.contact_person) && <div className="muted" style={{ fontSize: 12 }}>{c.customer_type === "commercial" ? c.contact_person : c.company}</div>}</td>
+                  <td data-label={t("customer.type")}><div className="title-row">
                     <span className="badge"><Icon name={c.customer_type === "commercial" ? "building" : "home"} size={12} />{t(`customer.type.${c.customer_type}`)}</span>
                     {c.is_retainer && <span className="badge primary">{t("customer.retainer")}</span>}
                   </div></td>
-                  <td onClick={(e) => e.stopPropagation()}>{c.email ? <a href={mailtoLink(c.email)}>{c.email}</a> : <span className="muted">—</span>}</td>
-                  <td onClick={(e) => e.stopPropagation()} className="nowrap">{phone ? <a href={telLink(phone)}>{phone}</a> : <span className="muted">—</span>}</td>
-                  <td>{c.repair_count}{c.open_repairs > 0 && <span className="badge accent" style={{ marginLeft: 6 }}>{fill(t("customers.openCount"), { count: c.open_repairs })}</span>}</td>
-                  <td className="nowrap">{c.total_billed ? formatMoney(c.total_billed) : <span className="muted">—</span>}</td>
+                  <td data-label={t("customer.email")} onClick={(e) => e.stopPropagation()}>{c.email ? <a href={mailtoLink(c.email)}>{c.email}</a> : <span className="muted">—</span>}</td>
+                  <td data-label={t("customer.phone")} onClick={(e) => e.stopPropagation()} className="nowrap">{phone ? <a href={telLink(phone)}>{phone}</a> : <span className="muted">—</span>}</td>
+                  <td data-label={t("customers.repairs")}>{c.repair_count}{c.open_repairs > 0 && <span className="badge accent" style={{ marginLeft: 6 }}>{fill(t("customers.openCount"), { count: c.open_repairs })}</span>}</td>
+                  <td data-label={t("customers.billed")} className="nowrap">{c.total_billed ? formatMoney(c.total_billed) : <span className="muted">—</span>}</td>
                 </tr>
               );
             })}</tbody>
