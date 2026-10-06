@@ -150,5 +150,13 @@
   "settings.portableConfirm": "Restore this portable backup? All current data will be replaced after a native safety backup is created.",
   "settings.portableInvalid": "Choose a valid .dbrepairs portable backup.",
   "settings.portableError": "Could not create the portable backup.",
-  "settings.portableRestoreError": "Could not restore the portable backup. Current data was not changed."
+  "settings.portableRestoreError": "Could not restore the portable backup. Current data was not changed.",
+  "auth.title": "Sign in",
+  "auth.subtitle": "Enter the shop password to open DBRepairs.",
+  "auth.password": "Password",
+  "auth.signIn": "Sign in",
+  "auth.signingIn": "Signing in…",
+  "auth.invalid": "Wrong password.",
+  "auth.throttled": "Too many failed attempts. Wait 15 minutes and try again.",
+  "auth.signOut": "Sign out"
 }

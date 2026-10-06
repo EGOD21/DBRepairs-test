@@ -37,12 +37,14 @@ function boolean(value, name) {
   throw new PortableBackupError(`${name} must be a boolean`);
 }
 
+// SQLite stores CURRENT_TIMESTAMP as UTC without a zone ("2026-08-21 12:00:00").
+// Mark such values as UTC so PostgreSQL does not read them in its local time zone.
 function timestamp(value, name, nullable = false) {
   const result = text(value, name, { nullable, max: 80 });
-  if (result !== null && Number.isNaN(Date.parse(result.replace(" ", "T") + (/Z$|[+-]\d\d:\d\d$/.test(result) ? "" : "Z")))) {
-    throw new PortableBackupError(`${name} must be a timestamp`);
-  }
-  return result;
+  if (result === null) return null;
+  const normalized = /Z$|[+-]\d\d(:?\d\d)?$/.test(result) ? result : `${result.replace(" ", "T")}Z`;
+  if (Number.isNaN(Date.parse(normalized))) throw new PortableBackupError(`${name} must be a timestamp`);
+  return normalized;
 }
 
 function unique(rows, field, name) {

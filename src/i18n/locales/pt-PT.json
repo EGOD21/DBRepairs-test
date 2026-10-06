@@ -150,5 +150,13 @@
   "settings.portableConfirm": "Repor esta cópia portátil? Todos os dados atuais serão substituídos depois de ser criada uma cópia nativa de segurança.",
   "settings.portableInvalid": "Escolhe uma cópia portátil .dbrepairs válida.",
   "settings.portableError": "Não foi possível criar a cópia portátil.",
-  "settings.portableRestoreError": "Não foi possível repor a cópia portátil. Os dados atuais não foram alterados."
+  "settings.portableRestoreError": "Não foi possível repor a cópia portátil. Os dados atuais não foram alterados.",
+  "auth.title": "Iniciar sessão",
+  "auth.subtitle": "Introduza a palavra-passe da loja para abrir o DBRepairs.",
+  "auth.password": "Palavra-passe",
+  "auth.signIn": "Entrar",
+  "auth.signingIn": "A entrar…",
+  "auth.invalid": "Palavra-passe incorreta.",
+  "auth.throttled": "Demasiadas tentativas falhadas. Aguarde 15 minutos e tente novamente.",
+  "auth.signOut": "Terminar sessão"
 }

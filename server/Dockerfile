@@ -1,5 +1,6 @@
 FROM node:22-alpine
-RUN apk add --no-cache postgresql-client
+# pg_dump/pg_restore must not be older than the PostgreSQL 17 server.
+RUN apk add --no-cache postgresql17-client
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev

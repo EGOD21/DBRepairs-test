@@ -9,6 +9,7 @@ import {
 } from "../data/customers";
 import { useI18n } from "../i18n/I18nProvider";
 import { listRepairsByCustomer, Repair } from "../data/repairs";
+import { formatDbDate } from "../data/dates";
 
 const emptyCustomer: CustomerInput = {
   name: "",
@@ -263,7 +264,7 @@ export default function CustomersPage() {
                               <td><strong>{repair.repair_number}</strong></td>
                               <td>{[repair.device_type, repair.brand, repair.model].filter(Boolean).join(" · ") || "—"}</td>
                               <td><span className="status-pill">{t(repair.status_label_key)}</span></td>
-                              <td>{new Date(repair.opened_at).toLocaleString()}</td>
+                              <td>{formatDbDate(repair.opened_at)}</td>
                             </tr>
                           ))}
                         </tbody>

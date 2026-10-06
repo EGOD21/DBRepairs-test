@@ -150,5 +150,13 @@
   "settings.portableConfirm": "Restaurer cette sauvegarde portable ? Toutes les données actuelles seront remplacées après la création d’une sauvegarde native de sécurité.",
   "settings.portableInvalid": "Choisissez une sauvegarde portable .dbrepairs valide.",
   "settings.portableError": "Impossible de créer la sauvegarde portable.",
-  "settings.portableRestoreError": "Impossible de restaurer la sauvegarde portable. Les données actuelles n’ont pas été modifiées."
+  "settings.portableRestoreError": "Impossible de restaurer la sauvegarde portable. Les données actuelles n’ont pas été modifiées.",
+  "auth.title": "Connexion",
+  "auth.subtitle": "Saisissez le mot de passe de la boutique pour ouvrir DBRepairs.",
+  "auth.password": "Mot de passe",
+  "auth.signIn": "Se connecter",
+  "auth.signingIn": "Connexion…",
+  "auth.invalid": "Mot de passe incorrect.",
+  "auth.throttled": "Trop de tentatives échouées. Patientez 15 minutes puis réessayez.",
+  "auth.signOut": "Se déconnecter"
 }

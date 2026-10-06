@@ -2,11 +2,14 @@ import Fastify from "fastify";
 import { createPostgresBackup, isPostgresBackup, restorePostgresBackup } from "./backup.js";
 import { customerInput, officeSettingsInput, pathId, repairInput, ValidationError } from "./validation.js";
 import { exportPortableBackup, importPortableBackup, PortableBackupError } from "./portable.js";
+import { createLoginLimiter, issueSession, passwordMatches, readCookie, SESSION_COOKIE, sessionCookie, verifySession } from "./auth.js";
 
 const repairSelect = `SELECT r.*, c.name customer_name, s.code status_code, s.label_key status_label_key
   FROM repairs r
   JOIN customers c ON c.id = r.customer_id
   JOIN repair_statuses s ON s.id = r.status_id`;
+
+const publicPaths = new Set(["/api/health", "/api/session", "/api/login", "/api/logout"]);
 
 function replyNotFound(reply) {
   return reply.code(404).send({ error: "Not found" });
@@ -20,9 +23,20 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
     done(null, body);
   });
 
+  const loginLimiter = createLoginLimiter();
+  const isAuthenticated = (request) => verifySession(config.auth.sessionKey, readCookie(request.headers.cookie, SESSION_COOKIE));
+
   app.addHook("onRequest", async (request, reply) => {
-    if (restoring && request.url !== "/api/health") {
+    const path = request.url.split("?")[0];
+    // Browsers label requests coming from other websites; never act on those.
+    if (request.headers["sec-fetch-site"] === "cross-site") {
+      return reply.code(403).send({ error: "Cross-site requests are not allowed" });
+    }
+    if (restoring && path !== "/api/health") {
       return reply.code(503).send({ error: "Database restore in progress" });
+    }
+    if (!publicPaths.has(path) && !isAuthenticated(request)) {
+      return reply.code(401).send({ error: "Authentication required" });
     }
   });
 
@@ -49,6 +63,23 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
     await pool.query("SELECT 1");
     return { status: "ok" };
   });
+
+  app.get("/api/session", async (request) => ({ authenticated: isAuthenticated(request) }));
+
+  app.post("/api/login", async (request, reply) => {
+    const ip = request.ip;
+    if (loginLimiter.blocked(ip)) return reply.code(429).send({ error: "Too many failed attempts. Try again later" });
+    if (!passwordMatches(request.body?.password, config.auth.password)) {
+      loginLimiter.fail(ip);
+      return reply.code(401).send({ error: "Wrong password" });
+    }
+    loginLimiter.reset(ip);
+    const { token, maxAge } = issueSession(config.auth.sessionKey);
+    return reply.header("Set-Cookie", sessionCookie(token, { maxAge, secure: request.protocol === "https" })).code(204).send();
+  });
+
+  app.post("/api/logout", async (request, reply) =>
+    reply.header("Set-Cookie", sessionCookie("", { maxAge: 0, secure: request.protocol === "https" })).code(204).send());
 
   app.get("/api/customers", async (request) => {
     const search = typeof request.query?.search === "string" ? request.query.search.trim() : "";
