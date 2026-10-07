@@ -80,7 +80,7 @@ export default function ScanButton({ onResult, label }: { onResult: (text: strin
   const [open, setOpen] = useState(false);
   return (
     <>
-      <button type="button" className="btn btn-icon" onClick={() => setOpen(true)} title={label ?? t("scan.title")} aria-label={label ?? t("scan.title")}><Icon name="scan" size={16} /></button>
+      <button type="button" className="btn btn-icon scan-btn" onClick={() => setOpen(true)} title={label ?? t("scan.title")} aria-label={label ?? t("scan.title")}><Icon name="scan" size={16} /></button>
       {open && <ScanModal onClose={() => setOpen(false)} onResult={(text) => { setOpen(false); onResult(text); }} />}
     </>
   );
