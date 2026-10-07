@@ -114,6 +114,11 @@ export function repairInput(value, update = false) {
     paid: flag(body.paid),
     warranty_days: wholeNumber(body.warranty_days, "warranty_days", { max: 3650 }),
   };
+  // Server-edition intake fields. Only sent by the web app, so older clients leave them alone.
+  result.extras = {};
+  if ("asset_id" in body) result.extras.asset_id = body.asset_id ? id(body.asset_id, "asset_id") : null;
+  if ("data_backup" in body) result.extras.data_backup = choice(body.data_backup || null, "data_backup", ["requested", "declined", "not_needed"], null);
+  if ("intake_checklist" in body) result.extras.intake_checklist = checklistInput(body.intake_checklist);
   if (update) {
     result.diagnosis = text(body.diagnosis, "diagnosis");
     result.work_performed = text(body.work_performed, "work_performed");
@@ -121,6 +126,15 @@ export function repairInput(value, update = false) {
     result.statusNote = text(body.statusNote, "statusNote");
   }
   return result;
+}
+
+// { "Charger": true, "Bag": false } — ticked items from the intake checklist.
+function checklistInput(value) {
+  if (value == null || value === "") return null;
+  if (typeof value !== "object" || Array.isArray(value)) throw new ValidationError("intake_checklist must be an object");
+  const entries = Object.entries(value);
+  if (entries.length > 50) throw new ValidationError("intake_checklist has too many items");
+  return Object.fromEntries(entries.map(([key, checked]) => [String(key).slice(0, 200), flag(checked)]));
 }
 
 export function partInput(value) {
@@ -171,6 +185,12 @@ export const SETTING_LIMITS = {
   "billing.invoiceNotes": 2000,
   "billing.paymentInstructions": 2000,
   "billing.paymentLink": 1000,
+  // Client records (see records.js).
+  "vault.techAccess": 1,
+  "intake.checklist": 2000,
+  "intake.waiver": 4000,
+  "wipe.prefix": 20,
+  "wipe.statement": 2000,
 };
 
 const NUMBER_SETTINGS = ["billing.taxRate", "billing.hourlyRate", "billing.timeRounding", "billing.paymentTermsDays", "billing.estimateValidDays", "photos.autoDeleteDays"];

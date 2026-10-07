@@ -15,6 +15,7 @@ import { fontOptions, hubspotTheme, isSafeThemeValue, parseTheme, radiusOptions,
 import { defaultLabelSize, labelSizes } from "../print/types";
 import { useSession } from "../session";
 import { fill } from "../lib/format";
+import { defaultChecklist } from "../data/records";
 import { emptyAppIcons, makeAppIcons } from "../lib/appIcons";
 import { MyAccountSection, TeamSection } from "../components/TeamSettings";
 import StorageSettings from "../components/StorageSettings";
@@ -117,6 +118,7 @@ export default function SettingsPage({ section }: { section?: string }) {
 
   const businessKeys: SettingKey[] = ["office.companyName", "office.taxNumber", "office.address", "office.phone", "office.email", "office.website"];
   const printKeys: SettingKey[] = ["print.autoPrint", "print.labelSize", "print.terms"];
+  const intakeKeys: SettingKey[] = ["intake.checklist", "intake.waiver", "vault.techAccess", "wipe.prefix", "wipe.statement"];
   const billingKeys: SettingKey[] = ["billing.currency", "billing.hourlyRate", "billing.taxLabel", "billing.taxRate", "billing.timeRounding", "billing.paymentTermsDays",
     "billing.invoicePrefix", "billing.estimatePrefix", "billing.estimateValidDays", "billing.invoiceNotes", "billing.paymentInstructions", "billing.paymentLink"];
   const groups = useMemo(() => {
@@ -208,7 +210,7 @@ export default function SettingsPage({ section }: { section?: string }) {
     ...(isAdmin ? [["business", "building", t("settings.office")], ["appearance", "palette", t("settings.appearance")], ["printing", "printer", t("settings.printing")],
       ["email", "mail", t("settings.emailSection")]] as [string, IconName, string][] : []),
     ...(isAdmin && teamFeatures ? [["team", "users", t("team.title")] as [string, IconName, string]] : []),
-    ...(isAdmin && isServerMode ? [["billing", "receipt", t("settings.billing")], ["storage", "hardDrive", t("storage.title")],
+    ...(isAdmin && isServerMode ? [["billing", "receipt", t("settings.billing")], ["intake", "lock", t("settings.intake")], ["storage", "hardDrive", t("storage.title")],
       ["activity", "activity", t("activity.title")]] as [string, IconName, string][] : []),
     ["language", "globe", t("settings.language")],
     ...(isAdmin ? [["data", "database", t("settings.data")] as [string, IconName, string]] : []),
@@ -332,6 +334,22 @@ export default function SettingsPage({ section }: { section?: string }) {
               <label className="field full"><span>{t("settings.paymentInstructions")}</span><textarea rows={3} value={settings["billing.paymentInstructions"]} onChange={(e) => set("billing.paymentInstructions", e.target.value)} placeholder={t("settings.paymentInstructionsPlaceholder")} /></label>
               <label className="field full"><span>{t("settings.paymentLink")}</span><input value={settings["billing.paymentLink"]} onChange={(e) => set("billing.paymentLink", e.target.value)} placeholder="https://buy.stripe.com/…?prefilled_amount={amount}&client_reference_id={number}" />
                 <small>{t("settings.paymentLinkHint")}</small></label>
+            </div>
+          </Section>}
+          {isServerMode && <Section id="intake" icon="lock" title={t("settings.intake")} hint={t("settings.intakeHint")}
+            footer={<button type="button" className="btn btn-primary" disabled={!changed(intakeKeys) || busy !== ""} onClick={() => void persist(intakeKeys)}>{t("common.saveChanges")}</button>}>
+            <div className="form-grid">
+              <label className="field full"><span>{t("settings.intakeChecklist")}</span>
+                <textarea rows={7} value={settings["intake.checklist"]} onChange={(e) => set("intake.checklist", e.target.value)} placeholder={defaultChecklist} />
+                <small>{t("settings.intakeChecklistHint")}</small></label>
+              <label className="field full"><span>{t("settings.intakeWaiver")}</span>
+                <textarea rows={5} value={settings["intake.waiver"]} onChange={(e) => set("intake.waiver", e.target.value)} placeholder={t("intake.defaultWaiver")} />
+                <small>{t("settings.intakeWaiverHint")}</small></label>
+              <label className="check full"><input type="checkbox" checked={settings["vault.techAccess"] !== "0"} onChange={(e) => set("vault.techAccess", e.target.checked ? "1" : "0")} />{t("settings.vaultTechAccess")}</label>
+              <p className="hint full">{t("settings.vaultHint")}</p>
+              <label className="field"><span>{t("settings.wipePrefix")}</span><input value={settings["wipe.prefix"]} placeholder="WIPE-" onChange={(e) => set("wipe.prefix", e.target.value)} /></label>
+              <label className="field full"><span>{t("settings.wipeStatement")}</span>
+                <textarea rows={4} value={settings["wipe.statement"]} onChange={(e) => set("wipe.statement", e.target.value)} placeholder={t("wipe.defaultStatement")} /></label>
             </div>
           </Section>}
           {isServerMode && <Section id="storage" icon="hardDrive" title={t("storage.title")} hint={t("storage.hint")}><StorageSettings /></Section>}

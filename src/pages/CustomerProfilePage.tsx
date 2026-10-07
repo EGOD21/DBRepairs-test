@@ -7,6 +7,10 @@ import TimeCard from "../components/TimeCard";
 import ActivityCard from "../components/ActivityCard";
 import ContractsCard from "../components/ContractsCard";
 import MaintenanceCard from "../components/MaintenanceCard";
+import AssetsCard from "../components/AssetsCard";
+import NetworkCard from "../components/NetworkCard";
+import VaultCard from "../components/VaultCard";
+import WipesCard from "../components/WipesCard";
 import { isServerMode } from "../data/runtime";
 import { Customer, deleteCustomer, getCustomer, toCustomerInput } from "../data/customers";
 import { isOverdue, listRepairsByCustomer, Repair } from "../data/repairs";
@@ -18,6 +22,8 @@ import { emailSignature } from "../lib/emailTemplates";
 import { useI18n } from "../i18n/I18nProvider";
 import { href, navigate } from "../router";
 
+const profileTabs = ["overview", "billing", "equipment", "network", "activity"] as const;
+
 export default function CustomerProfilePage({ id }: { id: number }) {
   const { t } = useI18n();
   const [customer, setCustomer] = useState<Customer | null>(null);
@@ -26,6 +32,7 @@ export default function CustomerProfilePage({ id }: { id: number }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState(false);
+  const [tab, setTab] = useState<typeof profileTabs[number]>("overview");
 
   async function load() {
     const [c, r] = await Promise.all([getCustomer(id), listRepairsByCustomer(id)]);
@@ -101,6 +108,12 @@ export default function CustomerProfilePage({ id }: { id: number }) {
 
       <div className="detail-grid">
         <div className="detail-main">
+          {isServerMode && (
+            <nav className="tabs" aria-label={customer.name}>
+              {profileTabs.map((name) => <button key={name} type="button" className={tab === name ? "active" : ""} onClick={() => setTab(name)}>{t(`customer.tab.${name}`)}</button>)}
+            </nav>
+          )}
+          {tab === "overview" && <>
           <section className="card">
             <div className="card-header"><div><h2>{t("customers.repairsTitle")}</h2><p>{t("customers.repairsHint")}</p></div></div>
             {repairs.length === 0 ? <div className="empty">{t("customers.repairsEmpty")}</div> : (
@@ -120,10 +133,22 @@ export default function CustomerProfilePage({ id }: { id: number }) {
             )}
           </section>
           {isServerMode && <ContractsCard customerId={customer.id} onChange={() => void load()} />}
-          {isServerMode && <BillingCard customerId={customer.id} />}
           {isServerMode && <MaintenanceCard customerId={customer.id} />}
-          {isServerMode && <TimeCard customerId={customer.id} title={t("time.customerTitle")} />}
           {customer.notes && <section className="card"><div className="card-header"><h2>{t("customer.notes")}</h2></div><div className="card-body" style={{ whiteSpace: "pre-wrap" }}>{customer.notes}</div></section>}
+          </>}
+          {tab === "billing" && <>
+            <BillingCard customerId={customer.id} />
+            <TimeCard customerId={customer.id} title={t("time.customerTitle")} />
+          </>}
+          {tab === "equipment" && <>
+            <AssetsCard customerId={customer.id} />
+            <WipesCard customerId={customer.id} />
+          </>}
+          {tab === "network" && <>
+            <NetworkCard customerId={customer.id} />
+            <VaultCard customerId={customer.id} />
+          </>}
+          {tab === "activity" && <ActivityCard customerId={customer.id} />}
         </div>
         <div className="detail-side">
           <section className="card">
@@ -146,7 +171,6 @@ export default function CustomerProfilePage({ id }: { id: number }) {
               </div>
             </section>
           )}
-          {isServerMode && <ActivityCard customerId={customer.id} />}
         </div>
       </div>
       {editing && <CustomerFormModal customerId={customer.id} initial={toCustomerInput(customer)} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); void load(); }} />}

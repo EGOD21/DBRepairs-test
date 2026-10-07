@@ -19,6 +19,7 @@ import ChatPage from "./pages/ChatPage";
 import BillingPage from "./pages/BillingPage";
 import InvoicePage from "./pages/InvoicePage";
 import ReportsPage from "./pages/ReportsPage";
+import AssetPage from "./pages/AssetPage";
 import RunningTimerChip from "./components/RunningTimerChip";
 import { SessionProvider, useSession } from "./session";
 import { getLastSeen, unreadCount } from "./data/chat";
@@ -91,7 +92,7 @@ function Workspace({ onSignOut }: { onSignOut?: () => void }) {
 
   useEffect(() => { setMoreOpen(false); }, [route]);
 
-  const sections: Partial<Record<Route["name"], Route["name"]>> = { repair: "repairs", customer: "customers", invoice: "billing" };
+  const sections: Partial<Record<Route["name"], Route["name"]>> = { repair: "repairs", customer: "customers", invoice: "billing", asset: "customers" };
   const section = sections[route.name] ?? route.name;
   // "phone" links sit in the bottom bar on phones; the rest are under More.
   type NavLink = { route: Route; icon: IconName; label: string; badge?: number; phone?: boolean };
@@ -157,6 +158,7 @@ function Workspace({ onSignOut }: { onSignOut?: () => void }) {
         {route.name === "chat" && (teamFeatures ? <ChatPage /> : <DashboardPage />)}
         {route.name === "settings" && <SettingsPage section={route.section} />}
         {route.name === "billing" && (teamFeatures ? <BillingPage tab={route.tab} /> : <DashboardPage />)}
+        {route.name === "asset" && (teamFeatures ? <AssetPage key={route.id} id={route.id} /> : <DashboardPage />)}
         {route.name === "reports" && (teamFeatures && isAdmin ? <ReportsPage /> : <DashboardPage />)}
         {route.name === "invoice" && (teamFeatures ? <InvoicePage key={route.id} id={route.id} /> : <DashboardPage />)}
       </main>

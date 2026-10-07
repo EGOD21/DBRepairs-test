@@ -41,6 +41,8 @@ export function loadConfig(env = process.env) {
     photosDir: env.PHOTOS_DIR?.trim() || "/data/photos",
     // Photo cleanup, maintenance tickets and contract invoices run on a timer.
     backgroundJobs: true,
+    // Encrypts the password vault. Without it the vault stays off.
+    vaultSecret: env.VAULT_KEY?.trim() || "",
     auth: { password, sessionKey: createSessionKey(password, env.SESSION_SECRET ?? "") },
   };
 }

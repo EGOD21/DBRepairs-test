@@ -10,14 +10,29 @@ import { audit, diff, registerAuditRoutes } from "./audit.js";
 import { invoiceSelect, registerBillingRoutes } from "./billing.js";
 import { registerContractRoutes, slaHours, startScheduler } from "./contracts.js";
 import { registerReportRoutes } from "./reports.js";
+import { registerRecordRoutes } from "./records.js";
+import { vaultKey } from "./vault.js";
 
 const repairSelect = `SELECT r.*, c.name customer_name, c.email customer_email, c.phone customer_phone, c.mobile customer_mobile,
     c.company customer_company, s.code status_code, s.label_key status_label_key,
     (SELECT COUNT(*) FROM repair_parts p WHERE p.repair_id = r.id AND p.status IN ('needed','ordered'))::integer parts_pending,
-    (SELECT COUNT(*) FROM repair_photos ph WHERE ph.repair_id = r.id)::integer photo_count
+    (SELECT COUNT(*) FROM repair_photos ph WHERE ph.repair_id = r.id)::integer photo_count,
+    (SELECT a.name FROM assets a WHERE a.id = r.asset_id) asset_name
   FROM repairs r
   JOIN customers c ON c.id = r.customer_id
   JOIN repair_statuses s ON s.id = r.status_id`;
+
+/** Saves the optional server-edition fields of a repair (equipment, intake checklist, data backup). */
+async function saveRepairExtras(db, repairId, customerId, extras) {
+  const fields = Object.keys(extras ?? {});
+  if (!fields.length) return;
+  if (extras.asset_id) {
+    const asset = await db.query("SELECT customer_id FROM assets WHERE id=$1", [extras.asset_id]);
+    if (!asset.rowCount || asset.rows[0].customer_id !== customerId) throw new ValidationError("The equipment belongs to another customer");
+  }
+  const values = fields.map((field) => (field === "intake_checklist" && extras[field] ? JSON.stringify(extras[field]) : extras[field]));
+  await db.query(`UPDATE repairs SET ${fields.map((field, i) => `${field}=$${i + 1}`).join(", ")} WHERE id=$${fields.length + 1}`, [...values, repairId]);
+}
 
 // Customer columns plus repair statistics for lists and profiles.
 const customerSelect = `SELECT c.id, c.name, c.company, c.tax_number, c.phone, c.mobile, c.email, c.address, c.notes,
@@ -193,10 +208,11 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
   registerAuditRoutes(app, pool, requireAdmin);
   registerBillingRoutes(app, pool, { requireAdmin, readSettings });
   registerContractRoutes(app, pool, { requireAdmin, readSettings });
-  registerReportRoutes(app, pool, { requireAdmin });
 
   const photoStore = createPhotoStore(config.photosDir);
   registerPhotoRoutes(app, pool, { store: photoStore, requireAdmin, readSettings });
+  registerReportRoutes(app, pool, { requireAdmin });
+  registerRecordRoutes(app, pool, { requireAdmin, readSettings, store: photoStore, vaultKey: config.vaultKey ?? vaultKey(config.vaultSecret) });
   if (config.backgroundJobs) {
     const stopAutoPrune = startAutoPrune(pool, photoStore, readSettings, app.log);
     const stopScheduler = startScheduler(pool, readSettings, app.log);
@@ -270,6 +286,19 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
     return result.rows[0];
   });
 
+  // Intake details saved on their own from the repair page: equipment, backup choice, checklist.
+  app.put("/api/repairs/:id/intake", async (request, reply) => {
+    const id = pathId(request.params.id);
+    const body = request.body && typeof request.body === "object" ? request.body : {};
+    const { extras } = repairInput({ ...body, customer_id: 1, status_id: 1, reported_fault: "-" });
+    const repair = (await pool.query("SELECT customer_id, repair_number, asset_id, data_backup FROM repairs WHERE id=$1", [id])).rows[0];
+    if (!repair) return replyNotFound(reply);
+    await saveRepairExtras(pool, id, repair.customer_id, extras);
+    await audit(pool, request, { action: "update", entity: "repair", entityId: id, repairId: id, customerId: repair.customer_id, summary: `Intake details updated`,
+      changes: diff(repair, extras, Object.keys(extras).filter((key) => key !== "intake_checklist")) });
+    return reply.code(204).send();
+  });
+
   app.get("/api/repairs/:id/history", async (request) =>
     (await pool.query(`SELECT h.id, h.status_id, s.code status_code, s.label_key status_label_key, h.changed_at, h.note
       FROM repair_status_history h JOIN repair_statuses s ON s.id=h.status_id
@@ -295,6 +324,7 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
       const responseHours = await slaHours(client, input.customer_id);
       if (responseHours) await client.query("UPDATE repairs SET sla_due_at = now() + make_interval(hours => $1::integer) WHERE id=$2", [responseHours, id]);
       await client.query("INSERT INTO repair_status_history (repair_id,status_id) VALUES ($1,$2)", [id,input.status_id]);
+      await saveRepairExtras(client, id, input.customer_id, input.extras);
       await audit(client, request, { action: "create", entity: "repair", entityId: id, repairId: id, customerId: input.customer_id, summary: `Repair ${repairNumber} created` });
       await client.query("COMMIT");
       return reply.code(201).send({ id });
@@ -322,6 +352,7 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
         closed_at=CASE WHEN (SELECT code FROM repair_statuses WHERE id=$2) IN ('DELIVERED','CANCELLED') THEN COALESCE(closed_at,now()) ELSE NULL END
         WHERE id=$22`, [...repairValues(input), input.diagnosis, input.work_performed, input.final_value, id]);
       const before = current.rows[0];
+      await saveRepairExtras(client, id, input.customer_id, input.extras);
       if (before.status_id !== input.status_id) {
         await client.query("INSERT INTO repair_status_history (repair_id,status_id,note) VALUES ($1,$2,$3)", [id,input.status_id,input.statusNote]);
         // Moving a repair on counts as the first response.

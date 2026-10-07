@@ -2,6 +2,9 @@ export type RepairPrintData = {
   repairNumber: string; openedAt: string; customerName: string; phone?: string; email?: string; deviceType?: string; brand?: string; model?: string;
   serialNumber?: string; imei?: string; reportedFault?: string; accessories?: string; generalCondition?: string; internalNotes?: string;
   dueDate?: string; estimate?: string; deposit?: string; technician?: string; priority?: string;
+  /** Server edition intake: ticked checklist, backup choice, waiver text and the customer's intake signature. */
+  checklist?: { label: string; checked: boolean }[]; dataBackup?: string; waiver?: string; equipment?: string;
+  intakeSignature?: { image: string; name: string };
 };
 
 export type OfficeSettings = {

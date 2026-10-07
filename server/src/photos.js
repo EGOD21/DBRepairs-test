@@ -19,9 +19,17 @@ export function imageType(buffer) {
   return null;
 }
 
+/** Images, plus PDF documents (customer files only). */
+export function documentType(buffer) {
+  const image = imageType(buffer);
+  if (image) return image;
+  if (Buffer.isBuffer(buffer) && buffer.toString("latin1", 0, 5) === "%PDF-") return { contentType: "application/pdf", ext: "pdf" };
+  return null;
+}
+
 /** Keeps stored names to "ab/<uuid>.<ext>" so a database row can never point outside the photos folder. */
 export function isStoredName(name) {
-  return typeof name === "string" && /^[0-9a-f]{2}\/[0-9a-f-]{36}(\.thumb)?\.(jpg|png|webp)$/.test(name);
+  return typeof name === "string" && /^[0-9a-f]{2}\/[0-9a-f-]{36}(\.thumb)?\.(jpg|png|webp|pdf)$/.test(name);
 }
 
 export function pruneInput(value) {
@@ -272,6 +280,7 @@ export function registerPhotoRoutes(app, pool, { store, requireAdmin, readSettin
         COALESCE(SUM(p.size + p.thumb_size) FILTER (WHERE s.code IN ('DELIVERED','CANCELLED')), 0)::bigint closed_bytes
       FROM repair_photos p LEFT JOIN repairs r ON r.id = p.repair_id LEFT JOIN repair_statuses s ON s.id = r.status_id`);
     const row = totals.rows[0];
+    const docs = (await pool.query("SELECT COUNT(*)::integer count, COALESCE(SUM(size), 0)::bigint bytes FROM customer_files")).rows[0];
     const settings = await readSettings(["photos.autoDeleteDays"]);
     return {
       available: await store.available(),
@@ -280,6 +289,7 @@ export function registerPhotoRoutes(app, pool, { store, requireAdmin, readSettin
       photos: { count: row.count, bytes: Number(row.bytes) },
       archived: { count: row.archived_count, bytes: Number(row.archived_bytes) },
       closed: { count: row.closed_count, bytes: Number(row.closed_bytes) },
+      documents: { count: docs.count, bytes: Number(docs.bytes) },
       autoDeleteDays: Number(settings["photos.autoDeleteDays"]) || 0,
     };
   });
@@ -295,7 +305,9 @@ export function registerPhotoRoutes(app, pool, { store, requireAdmin, readSettin
     requireAdmin(request);
     await requireStore();
     const rows = (await pool.query("SELECT id, repair_number, file_name, thumb_name FROM repair_photos ORDER BY id")).rows;
-    const known = new Set();
+    // Customer documents share the folder, so their files are not leftovers.
+    const documents = (await pool.query("SELECT file_name FROM customer_files")).rows;
+    const known = new Set(documents.map((row) => row.file_name));
     const missing = [];
     for (const row of rows) {
       known.add(row.file_name);

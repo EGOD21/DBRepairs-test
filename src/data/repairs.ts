@@ -21,6 +21,10 @@ export type Repair = {
   sla_due_at?: string | null;
   first_response_at?: string | null;
   maintenance_plan_id?: number | null;
+  asset_id?: number | null;
+  asset_name?: string | null;
+  intake_checklist?: Record<string, boolean> | null;
+  data_backup?: "requested" | "declined" | "not_needed" | null;
 };
 
 export type RepairInput = {

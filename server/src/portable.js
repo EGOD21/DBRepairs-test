@@ -208,7 +208,7 @@ export async function exportPortableBackup(pool) {
 }
 
 // Children before parents. The audit log and document numbers are kept.
-export const SERVER_ONLY_TABLES = ["running_timers", "time_entries", "payments", "invoice_lines", "signatures", "invoices", "maintenance_plans", "contracts"];
+export const SERVER_ONLY_TABLES = ["running_timers", "time_entries", "payments", "invoice_lines", "signatures", "invoices", "maintenance_plans", "contracts", "data_wipes", "credentials", "customer_files", "network_items", "customer_networks", "assets"];
 
 export async function importPortableBackup(pool, value) {
   const archive = validatePortableBackup(value);

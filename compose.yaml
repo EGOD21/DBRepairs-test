@@ -63,6 +63,9 @@ services:
       TZ: ${TZ:-Europe/Lisbon}
       TRUST_PROXY: "true"
       PHOTOS_DIR: /data/photos
+      # Turns on the encrypted password vault. Keep a copy somewhere safe:
+      # without the same key, saved passwords cannot be read.
+      VAULT_KEY: ${VAULT_KEY:-}
     volumes:
       # Repair photos, kept apart from the database so they can be backed up,
       # moved or removed on their own. Set PHOTOS_PATH to use a host folder.

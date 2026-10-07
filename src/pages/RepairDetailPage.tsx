@@ -8,6 +8,9 @@ import TimeCard from "../components/TimeCard";
 import BillingCard from "../components/BillingCard";
 import ActivityCard from "../components/ActivityCard";
 import SlaBadge from "../components/SlaBadge";
+import IntakeCard from "../components/IntakeCard";
+import WipesCard from "../components/WipesCard";
+import { checklistItems, defaultChecklist, RepairSignature } from "../data/records";
 import DeleteRepairDialog from "../components/DeleteRepairDialog";
 import Modal from "../components/Modal";
 import PhotoPrint from "../print/PhotoPrint";
@@ -47,6 +50,7 @@ export default function RepairDetailPage({ id }: { id: number }) {
   const [photoCount, setPhotoCount] = useState(0);
   const [deleting, setDeleting] = useState(false);
   const [galleryKey, setGalleryKey] = useState(0);
+  const [signatures, setSignatures] = useState<RepairSignature[]>([]);
   // Shown after a repair is saved as delivered or cancelled while it still has photos.
   const [closePrompt, setClosePrompt] = useState(false);
 
@@ -137,6 +141,18 @@ export default function RepairDetailPage({ id }: { id: number }) {
     }
   }
 
+  const intakeSignature = signatures.find((s) => s.kind === "intake");
+  const printData = {
+    ...toPrintData(repair),
+    ...(isServerMode ? {
+      checklist: checklistItems(settings["intake.checklist"] || defaultChecklist).map((label) => ({ label, checked: Boolean(repair.intake_checklist?.[label]) })),
+      dataBackup: repair.data_backup ? t(`intake.backup.${repair.data_backup}`) : undefined,
+      waiver: settings["intake.waiver"] || t("intake.defaultWaiver"),
+      equipment: repair.asset_name ?? undefined,
+      intakeSignature: intakeSignature ? { image: intakeSignature.image, name: intakeSignature.signer_name } : undefined,
+    } : {}),
+  };
+
   const field = (key: keyof RepairUpdateInput, label: string, props: Record<string, unknown> = {}) => (
     <label className="field"><span>{label}</span><input value={String(form[key] ?? "")} onChange={(e) => set(key, e.target.value as never)} {...props} /></label>
   );
@@ -205,8 +221,10 @@ export default function RepairDetailPage({ id }: { id: number }) {
               {area("internal_notes", t("repair.internalNotes"), 2)}
             </div>
           </section>
+          {isServerMode && <IntakeCard repair={repair} settings={settings} onChanged={() => void load()} onSignatures={setSignatures} />}
           {isServerMode && <TimeCard repairId={repair.id} customerId={repair.customer_id} />}
           {isServerMode && <BillingCard repairId={repair.id} customerId={repair.customer_id} />}
+          {isServerMode && <WipesCard customerId={repair.customer_id} repairId={repair.id} />}
           {isServerMode && <RepairPhotos key={galleryKey} repairId={repair.id} onCountChange={setPhotoCount} onPrint={setPrintingPhotos} />}
           <PartsEditor repairId={repair.id} onChange={() => { void getRepair(id).then((r) => r && setRepair((current) => current ? { ...current, parts_pending: r.parts_pending } : r)); }} />
         </div>
@@ -255,11 +273,11 @@ export default function RepairDetailPage({ id }: { id: number }) {
       </div>
 
       {printing && (
-        <PrintCenter data={toPrintData(repair)} office={officeFromSettings(settings)} initialKind={printing.kind}
+        <PrintCenter data={printData} office={officeFromSettings(settings)} initialKind={printing.kind}
           labelSize={settings["print.labelSize"] || defaultLabelSize} autoPrint={printing.auto} onClose={() => setPrinting(null)} />
       )}
       {printingPhotos && printingPhotos.length > 0 && (
-        <PhotoPrint photos={printingPhotos} data={toPrintData(repair)} office={officeFromSettings(settings)} onClose={() => setPrintingPhotos(null)} />
+        <PhotoPrint photos={printingPhotos} data={printData} office={officeFromSettings(settings)} onClose={() => setPrintingPhotos(null)} />
       )}
       {deleting && <DeleteRepairDialog repair={{ ...repair, photo_count: photoCount }} onClose={() => setDeleting(false)} onDeleted={() => navigate({ name: "repairs" })} />}
       {closePrompt && (

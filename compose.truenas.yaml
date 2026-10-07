@@ -77,6 +77,8 @@ services:
       TZ: Europe/Lisbon
       TRUST_PROXY: "true"
       PHOTOS_DIR: /data/photos
+      # Optional: a long random value turns on the encrypted password vault. Never change it afterwards.
+      VAULT_KEY: ""
     volumes:
       - /mnt/Apps/dbrepairs-photos:/data/photos
     depends_on:

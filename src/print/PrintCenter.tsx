@@ -135,9 +135,16 @@ function IntakeHalf({ title, data, office, shopCopy = false }: { title: string; 
       <div className="slip-row"><span>{t("repair.reportedFault")}</span><p>{data.reportedFault || "—"}</p></div>
       <div className="slip-row"><span>{t("repair.accessories")}</span><p>{data.accessories || "—"}</p></div>
       <div className="slip-row"><span>{t("repair.generalCondition")}</span><p>{data.generalCondition || "—"}</p></div>
+      {data.checklist && (
+        <div className="slip-row slip-checklist"><span>{t("intake.checklist")}{data.dataBackup ? ` · ${t("intake.backup")}: ${data.dataBackup}` : ""}{data.equipment ? ` · ${data.equipment}` : ""}</span>
+          <p>{data.checklist.map((item) => `${item.checked ? "☑" : "☐"} ${item.label}`).join("   ")}</p></div>
+      )}
       {shopCopy && <div className="slip-row internal"><span>{t("repair.internalNotes")}</span><p>{data.internalNotes || "—"}</p></div>}
-      {!shopCopy && office.terms && <p className="slip-terms">{office.terms}</p>}
-      <div className="signature-row"><div><span>{t("print.customerSignature")}</span></div><div><span>{t("print.shopSignature")}</span></div></div>
+      {!shopCopy && (office.terms || data.waiver) && <p className="slip-terms">{[data.waiver, office.terms].filter(Boolean).join("\n")}</p>}
+      <div className="signature-row">
+        <div>{data.intakeSignature && <img className="slip-signature" src={data.intakeSignature.image} alt="" />}<span>{t("print.customerSignature")}{data.intakeSignature ? ` — ${data.intakeSignature.name}` : ""}</span></div>
+        <div><span>{t("print.shopSignature")}</span></div>
+      </div>
     </article>
   );
 }
