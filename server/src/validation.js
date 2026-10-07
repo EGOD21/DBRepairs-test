@@ -156,6 +156,8 @@ export const SETTING_LIMITS = {
   "print.labelSize": 50,
   "print.terms": 4000,
   "email.signature": 2000,
+  // Deletes photos of closed repairs, and archived photos, after this many days (0 = never).
+  "photos.autoDeleteDays": 10,
 };
 
 // Theme values become CSS custom properties, so allow only plain colors,
@@ -184,6 +186,7 @@ export function settingsInput(value) {
       throw new ValidationError("App icons must be PNG images");
     }
     if (key === "ui.theme" && cleaned) validateTheme(cleaned);
+    if (key === "photos.autoDeleteDays" && cleaned && !/^\d{1,5}$/.test(cleaned)) throw new ValidationError("photos.autoDeleteDays must be a whole number of days");
     result[key] = cleaned;
   }
   return result;

@@ -131,3 +131,16 @@ test("the installable-app manifest and icons are public", async (t) => {
   const unknown = await app.inject({ method: "GET", url: "/api/app/secrets.png" });
   assert.equal(unknown.statusCode, 404);
 });
+
+test("photo uploads require signing in and must be real images", async (t) => {
+  const app = testApp();
+  t.after(() => app.close());
+  const anonymous = await app.inject({ method: "POST", url: "/api/repairs/1/photos", headers: { "content-type": "application/octet-stream" }, payload: Buffer.from("x") });
+  assert.equal(anonymous.statusCode, 401);
+  const cookie = await login(app);
+  // The test app has no photos folder, so storage reports itself as unavailable.
+  const upload = await app.inject({ method: "POST", url: "/api/repairs/1/photos", headers: { cookie, "content-type": "application/octet-stream" }, payload: Buffer.from("not an image at all") });
+  assert.equal(upload.statusCode, 503);
+  const prune = await app.inject({ method: "POST", url: "/api/storage/prune", headers: { cookie }, payload: { target: "nothing" } });
+  assert.equal(prune.statusCode, 400);
+});

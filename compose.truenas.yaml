@@ -2,6 +2,7 @@
 # Create these datasets first:
 #   Apps/dbrepairs-postgres -> /mnt/Apps/dbrepairs-postgres
 #   Apps/dbrepairs-backups  -> /mnt/Apps/dbrepairs-backups
+#   Apps/dbrepairs-photos   -> /mnt/Apps/dbrepairs-photos (owned by uid 1000)
 # Replace the three passwords below before installing. Use a different long,
 # random value for each. DBRepairs refuses to start while they still say CHANGE-THIS.
 
@@ -75,6 +76,9 @@ services:
       DATABASE_POOL_SIZE: 10
       TZ: Europe/Lisbon
       TRUST_PROXY: "true"
+      PHOTOS_DIR: /data/photos
+    volumes:
+      - /mnt/Apps/dbrepairs-photos:/data/photos
     depends_on:
       db-init:
         condition: service_completed_successfully

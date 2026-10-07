@@ -37,6 +37,9 @@ export function loadConfig(env = process.env) {
     database,
     databasePoolSize: positiveInteger(env.DATABASE_POOL_SIZE, 10),
     trustProxy: env.TRUST_PROXY === "true",
+    // Repair photos are files in this folder (its own Docker volume), not in the database.
+    photosDir: env.PHOTOS_DIR?.trim() || "/data/photos",
+    autoPrunePhotos: true,
     auth: { password, sessionKey: createSessionKey(password, env.SESSION_SECRET ?? "") },
   };
 }
