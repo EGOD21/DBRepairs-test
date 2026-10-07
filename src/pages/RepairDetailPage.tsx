@@ -7,6 +7,7 @@ import RepairPhotos from "../components/RepairPhotos";
 import TimeCard from "../components/TimeCard";
 import BillingCard from "../components/BillingCard";
 import ActivityCard from "../components/ActivityCard";
+import SlaBadge from "../components/SlaBadge";
 import DeleteRepairDialog from "../components/DeleteRepairDialog";
 import Modal from "../components/Modal";
 import PhotoPrint from "../print/PhotoPrint";
@@ -154,6 +155,8 @@ export default function RepairDetailPage({ id }: { id: number }) {
             <PriorityBadge priority={repair.priority} quiet />
             {overdue && <span className="badge danger"><Icon name="alert" size={12} />{t("repair.overdue")}</span>}
             {repair.paid && <span className="badge success">{t("repair.paid")}</span>}
+            {repair.maintenance_plan_id && <span className="badge accent"><Icon name="clock" size={12} />{t("maintenance.badge")}</span>}
+            <SlaBadge repair={repair} />
           </div>
           <p><a href={href({ name: "customer", id: repair.customer_id })}>{repair.customer_name}</a> · {t("repair.openedAt")} {formatDbDate(repair.opened_at)}</p>
         </div>

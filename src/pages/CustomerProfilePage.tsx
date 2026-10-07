@@ -5,6 +5,8 @@ import CustomerFormModal from "../components/CustomerFormModal";
 import BillingCard from "../components/BillingCard";
 import TimeCard from "../components/TimeCard";
 import ActivityCard from "../components/ActivityCard";
+import ContractsCard from "../components/ContractsCard";
+import MaintenanceCard from "../components/MaintenanceCard";
 import { isServerMode } from "../data/runtime";
 import { Customer, deleteCustomer, getCustomer, toCustomerInput } from "../data/customers";
 import { isOverdue, listRepairsByCustomer, Repair } from "../data/repairs";
@@ -117,7 +119,9 @@ export default function CustomerProfilePage({ id }: { id: number }) {
               </table></div>
             )}
           </section>
+          {isServerMode && <ContractsCard customerId={customer.id} onChange={() => void load()} />}
           {isServerMode && <BillingCard customerId={customer.id} />}
+          {isServerMode && <MaintenanceCard customerId={customer.id} />}
           {isServerMode && <TimeCard customerId={customer.id} title={t("time.customerTitle")} />}
           {customer.notes && <section className="card"><div className="card-header"><h2>{t("customer.notes")}</h2></div><div className="card-body" style={{ whiteSpace: "pre-wrap" }}>{customer.notes}</div></section>}
         </div>
@@ -130,7 +134,7 @@ export default function CustomerProfilePage({ id }: { id: number }) {
               ))}</dl>
             </div>
           </section>
-          {customer.is_retainer && (
+          {customer.is_retainer && !isServerMode && (
             <section className="card">
               <div className="card-header"><h2>{t("customer.section.retainer")}</h2></div>
               <div className="card-body">

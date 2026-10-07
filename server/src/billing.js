@@ -138,7 +138,44 @@ export const timeSelect = `SELECT t.*, (t.minutes / 60.0)::float8 hours, c.name 
   LEFT JOIN invoices i ON i.id = t.invoice_id
   LEFT JOIN users u ON u.id = t.user_id`;
 
-async function nextNumber(client, kind, prefix) {
+export async function loadBillingSettings(readSettings) {
+  const s = await readSettings(["billing.taxRate", "billing.hourlyRate", "billing.invoicePrefix", "billing.estimatePrefix", "billing.paymentTermsDays",
+    "billing.estimateValidDays", "billing.invoiceNotes", "billing.timeRounding"]);
+  const number = (value, fallback) => (value !== "" && Number.isFinite(Number(value)) ? Number(value) : fallback);
+  return {
+    taxRate: number(s["billing.taxRate"], 0),
+    hourlyRate: number(s["billing.hourlyRate"], 0),
+    invoicePrefix: s["billing.invoicePrefix"] || "INV-",
+    estimatePrefix: s["billing.estimatePrefix"] || "EST-",
+    paymentTermsDays: number(s["billing.paymentTermsDays"], 14),
+    estimateValidDays: number(s["billing.estimateValidDays"], 30),
+    notes: s["billing.invoiceNotes"] || null,
+    timeRounding: number(s["billing.timeRounding"], 1),
+  };
+}
+
+/** Writes the lines and totals, and points the listed time entries at this invoice. */
+export async function writeLines(client, invoiceId, input, customerId) {
+  const totals = computeTotals(input.lines, input.tax_rate, input.discount);
+  await client.query("DELETE FROM invoice_lines WHERE invoice_id=$1", [invoiceId]);
+  for (const line of totals.lines) {
+    await client.query(`INSERT INTO invoice_lines (invoice_id, position, kind, description, quantity, unit_price, taxable, amount, repair_part_id, time_entry_ids)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+    [invoiceId, line.position, line.kind, line.description, line.quantity, line.unit_price, line.taxable, line.amount, line.repair_part_id, line.time_entry_ids]);
+  }
+  const entryIds = [...new Set(totals.lines.flatMap((line) => line.time_entry_ids))];
+  await client.query("UPDATE time_entries SET invoice_id=NULL WHERE invoice_id=$1 AND NOT (id = ANY($2))", [invoiceId, entryIds]);
+  if (entryIds.length) {
+    const linked = await client.query(`UPDATE time_entries SET invoice_id=$1 WHERE id = ANY($2) AND customer_id=$3
+      AND (invoice_id IS NULL OR invoice_id=$1) RETURNING id`, [invoiceId, entryIds, customerId]);
+    if (linked.rowCount !== entryIds.length) throw new ValidationError("Some time entries are already on another invoice or belong to another customer");
+  }
+  await client.query("UPDATE invoices SET subtotal=$1, discount=$2, tax_amount=$3, total=$4, updated_at=now() WHERE id=$5",
+    [totals.subtotal, totals.discount, totals.taxAmount, totals.total, invoiceId]);
+  return totals;
+}
+
+export async function nextNumber(client, kind, prefix) {
   const year = new Date().getFullYear();
   const result = await client.query(`INSERT INTO document_counters (kind, year, value) VALUES ($1,$2,1)
     ON CONFLICT (kind, year) DO UPDATE SET value = document_counters.value + 1 RETURNING value`, [kind, year]);
@@ -155,7 +192,7 @@ export async function syncRepairPaid(db, repairId) {
     ) sub WHERE r.id = $1 AND sub.paid IS NOT NULL AND EXISTS (SELECT 1 FROM invoices WHERE repair_id = $1 AND kind = 'invoice' AND status NOT IN ('void','draft'))`, [repairId]);
 }
 
-async function transaction(pool, work) {
+export async function transaction(pool, work) {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -174,21 +211,7 @@ const notFound = () => Object.assign(new Error("Not found"), { statusCode: 404 }
 const conflict = (message) => Object.assign(new Error(message), { statusCode: 409 });
 
 export function registerBillingRoutes(app, pool, { requireAdmin, readSettings }) {
-  const billingSettings = async () => {
-    const s = await readSettings(["billing.taxRate", "billing.hourlyRate", "billing.invoicePrefix", "billing.estimatePrefix", "billing.paymentTermsDays",
-      "billing.estimateValidDays", "billing.invoiceNotes", "billing.timeRounding"]);
-    const number = (value, fallback) => (value !== "" && Number.isFinite(Number(value)) ? Number(value) : fallback);
-    return {
-      taxRate: number(s["billing.taxRate"], 0),
-      hourlyRate: number(s["billing.hourlyRate"], 0),
-      invoicePrefix: s["billing.invoicePrefix"] || "INV-",
-      estimatePrefix: s["billing.estimatePrefix"] || "EST-",
-      paymentTermsDays: number(s["billing.paymentTermsDays"], 14),
-      estimateValidDays: number(s["billing.estimateValidDays"], 30),
-      notes: s["billing.invoiceNotes"] || null,
-      timeRounding: number(s["billing.timeRounding"], 1),
-    };
-  };
+  const billingSettings = () => loadBillingSettings(readSettings);
 
   async function loadInvoice(db, invoiceId) {
     const result = await db.query(`${invoiceSelect} WHERE i.id=$1`, [invoiceId]);
@@ -206,27 +229,6 @@ export function registerBillingRoutes(app, pool, { requireAdmin, readSettings })
       pool.query(`${timeSelect} WHERE t.invoice_id=$1 ORDER BY t.work_date, t.id`, [invoiceId]),
     ]);
     return { ...invoice, lines: lines.rows, payments: payments.rows, signature: signature.rows[0] ?? null, time_entries: time.rows };
-  }
-
-  /** Writes the lines and totals, and points the listed time entries at this invoice. */
-  async function writeLines(client, invoiceId, input, customerId) {
-    const totals = computeTotals(input.lines, input.tax_rate, input.discount);
-    await client.query("DELETE FROM invoice_lines WHERE invoice_id=$1", [invoiceId]);
-    for (const line of totals.lines) {
-      await client.query(`INSERT INTO invoice_lines (invoice_id, position, kind, description, quantity, unit_price, taxable, amount, repair_part_id, time_entry_ids)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-      [invoiceId, line.position, line.kind, line.description, line.quantity, line.unit_price, line.taxable, line.amount, line.repair_part_id, line.time_entry_ids]);
-    }
-    const entryIds = [...new Set(totals.lines.flatMap((line) => line.time_entry_ids))];
-    await client.query("UPDATE time_entries SET invoice_id=NULL WHERE invoice_id=$1 AND NOT (id = ANY($2))", [invoiceId, entryIds]);
-    if (entryIds.length) {
-      const linked = await client.query(`UPDATE time_entries SET invoice_id=$1 WHERE id = ANY($2) AND customer_id=$3
-        AND (invoice_id IS NULL OR invoice_id=$1) RETURNING id`, [invoiceId, entryIds, customerId]);
-      if (linked.rowCount !== entryIds.length) throw new ValidationError("Some time entries are already on another invoice or belong to another customer");
-    }
-    await client.query("UPDATE invoices SET subtotal=$1, discount=$2, tax_amount=$3, total=$4, updated_at=now() WHERE id=$5",
-      [totals.subtotal, totals.discount, totals.taxAmount, totals.total, invoiceId]);
-    return totals;
   }
 
   /** Suggested lines for a new invoice: unbilled time, then the repair's parts, then its price. */
@@ -532,6 +534,7 @@ export function registerBillingRoutes(app, pool, { requireAdmin, readSettings })
       const created = await client.query(`INSERT INTO time_entries (customer_id, repair_id, user_id, technician, work_date, minutes, description, billable, hourly_rate)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
       [customerId, input.repair_id, userId, tech, input.work_date, input.minutes, input.description, input.billable, input.hourly_rate ?? settings.hourlyRate]);
+      if (input.repair_id) await client.query("UPDATE repairs SET first_response_at = COALESCE(first_response_at, now()) WHERE id=$1", [input.repair_id]);
       await audit(client, request, { action: "create", entity: "time", entityId: created.rows[0].id, repairId: input.repair_id, customerId,
         summary: `${tech} logged ${(input.minutes / 60).toFixed(2)} h${input.description ? `: ${input.description}` : ""}` });
       return created.rows[0].id;
@@ -612,6 +615,7 @@ export function registerBillingRoutes(app, pool, { requireAdmin, readSettings })
       await stopTimer(client, request, null);
       await client.query("INSERT INTO running_timers (user_id, customer_id, repair_id, description) VALUES ($1,$2,$3,$4)",
         [request.user.id, customerId, input.repair_id, description]);
+      if (input.repair_id) await client.query("UPDATE repairs SET first_response_at = COALESCE(first_response_at, now()) WHERE id=$1", [input.repair_id]);
     });
     return (await pool.query(`${timerSelect} WHERE t.user_id=$1`, [request.user.id])).rows[0];
   });

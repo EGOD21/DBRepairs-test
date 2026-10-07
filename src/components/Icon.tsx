@@ -43,6 +43,7 @@ const icons = {
   checkSquare: [["rect", 3, 3, 18, 18, 2], ["path", "m9 12 2 2 4-4"]],
   user: [["circle", 12, 8, 4], ["path", "M20 21a8 8 0 0 0-16 0"]],
   menu: [["path", "M4 6h16M4 12h16M4 18h16"]],
+  chart: [["path", "M3 3v18h18"], ["path", "M7 16v-5M12 16V7M17 16v-8"]],
   activity: [["path", "M22 12h-4l-3 9L9 3l-3 9H2"]],
   dollar: [["path", "M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"]],
 } satisfies Record<string, Shape[]>;

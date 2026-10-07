@@ -18,6 +18,7 @@ import SettingsPage from "./pages/SettingsPage";
 import ChatPage from "./pages/ChatPage";
 import BillingPage from "./pages/BillingPage";
 import InvoicePage from "./pages/InvoicePage";
+import ReportsPage from "./pages/ReportsPage";
 import RunningTimerChip from "./components/RunningTimerChip";
 import { SessionProvider, useSession } from "./session";
 import { getLastSeen, unreadCount } from "./data/chat";
@@ -62,7 +63,7 @@ function Workspace({ onSignOut }: { onSignOut?: () => void }) {
   const { companyName, logo } = useBranding();
   const route = useRoute();
   const [collapsed, setCollapsed] = useState(readCollapsed);
-  const { user, teamFeatures } = useSession();
+  const { user, teamFeatures, isAdmin } = useSession();
   const [partsToOrder, setPartsToOrder] = useState(0);
   const [unread, setUnread] = useState(0);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -100,6 +101,7 @@ function Workspace({ onSignOut }: { onSignOut?: () => void }) {
     { route: { name: "customers" }, icon: "users", label: t("nav.customers"), phone: true },
     ...(teamFeatures ? [{ route: { name: "billing" } as Route, icon: "receipt" as IconName, label: t("nav.billing"), phone: true }] : []),
     { route: { name: "parts" }, icon: "package", label: t("nav.parts"), badge: partsToOrder || undefined },
+    ...(teamFeatures && isAdmin ? [{ route: { name: "reports" } as Route, icon: "chart" as IconName, label: t("nav.reports") }] : []),
     ...(teamFeatures ? [{ route: { name: "chat" } as Route, icon: "message" as IconName, label: t("nav.chat"), badge: unread || undefined }] : []),
     { route: { name: "settings" }, icon: "settings", label: t("nav.settings") },
   ];
@@ -155,6 +157,7 @@ function Workspace({ onSignOut }: { onSignOut?: () => void }) {
         {route.name === "chat" && (teamFeatures ? <ChatPage /> : <DashboardPage />)}
         {route.name === "settings" && <SettingsPage section={route.section} />}
         {route.name === "billing" && (teamFeatures ? <BillingPage tab={route.tab} /> : <DashboardPage />)}
+        {route.name === "reports" && (teamFeatures && isAdmin ? <ReportsPage /> : <DashboardPage />)}
         {route.name === "invoice" && (teamFeatures ? <InvoicePage key={route.id} id={route.id} /> : <DashboardPage />)}
       </main>
       <nav className="bottom-nav" aria-label={t("nav.main")}>

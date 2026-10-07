@@ -18,6 +18,9 @@ export type Repair = {
   /** Server edition only; always 0 on the desktop app. */
   photo_count: number;
   updated_at?: string;
+  sla_due_at?: string | null;
+  first_response_at?: string | null;
+  maintenance_plan_id?: number | null;
 };
 
 export type RepairInput = {

@@ -8,6 +8,8 @@ import { registerChatRoutes } from "./chat.js";
 import { createPhotoStore, registerPhotoRoutes, removeFiles, startAutoPrune } from "./photos.js";
 import { audit, diff, registerAuditRoutes } from "./audit.js";
 import { invoiceSelect, registerBillingRoutes } from "./billing.js";
+import { registerContractRoutes, slaHours, startScheduler } from "./contracts.js";
+import { registerReportRoutes } from "./reports.js";
 
 const repairSelect = `SELECT r.*, c.name customer_name, c.email customer_email, c.phone customer_phone, c.mobile customer_mobile,
     c.company customer_company, s.code status_code, s.label_key status_label_key,
@@ -190,12 +192,15 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
   registerChatRoutes(app, pool, requireAdmin);
   registerAuditRoutes(app, pool, requireAdmin);
   registerBillingRoutes(app, pool, { requireAdmin, readSettings });
+  registerContractRoutes(app, pool, { requireAdmin, readSettings });
+  registerReportRoutes(app, pool, { requireAdmin });
 
   const photoStore = createPhotoStore(config.photosDir);
   registerPhotoRoutes(app, pool, { store: photoStore, requireAdmin, readSettings });
-  if (config.autoPrunePhotos) {
+  if (config.backgroundJobs) {
     const stopAutoPrune = startAutoPrune(pool, photoStore, readSettings, app.log);
-    app.addHook("onClose", async () => stopAutoPrune());
+    const stopScheduler = startScheduler(pool, readSettings, app.log);
+    app.addHook("onClose", async () => { stopAutoPrune(); stopScheduler(); });
   }
 
   app.get("/api/customers", async (request) => {
@@ -286,6 +291,9 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
       const { id, opened_year: openedYear } = result.rows[0];
       const repairNumber = `${openedYear}-${String(id).padStart(6, "0")}`;
       await client.query("UPDATE repairs SET repair_number=$1 WHERE id=$2", [repairNumber, id]);
+      // Contract customers get a response deadline.
+      const responseHours = await slaHours(client, input.customer_id);
+      if (responseHours) await client.query("UPDATE repairs SET sla_due_at = now() + make_interval(hours => $1::integer) WHERE id=$2", [responseHours, id]);
       await client.query("INSERT INTO repair_status_history (repair_id,status_id) VALUES ($1,$2)", [id,input.status_id]);
       await audit(client, request, { action: "create", entity: "repair", entityId: id, repairId: id, customerId: input.customer_id, summary: `Repair ${repairNumber} created` });
       await client.query("COMMIT");
@@ -316,6 +324,8 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
       const before = current.rows[0];
       if (before.status_id !== input.status_id) {
         await client.query("INSERT INTO repair_status_history (repair_id,status_id,note) VALUES ($1,$2,$3)", [id,input.status_id,input.statusNote]);
+        // Moving a repair on counts as the first response.
+        await client.query("UPDATE repairs SET first_response_at = COALESCE(first_response_at, now()) WHERE id=$1", [id]);
       }
       const changes = diff(before, input, [...repairColumns.split(","), "diagnosis", "work_performed", "final_value"]);
       if (changes.status_id) {
