@@ -2,6 +2,10 @@ import { useEffect, useState } from "react";
 import Icon from "../components/Icon";
 import { PriorityBadge, StatusBadge } from "../components/Badges";
 import CustomerFormModal from "../components/CustomerFormModal";
+import BillingCard from "../components/BillingCard";
+import TimeCard from "../components/TimeCard";
+import ActivityCard from "../components/ActivityCard";
+import { isServerMode } from "../data/runtime";
 import { Customer, deleteCustomer, getCustomer, toCustomerInput } from "../data/customers";
 import { isOverdue, listRepairsByCustomer, Repair } from "../data/repairs";
 import { getSettings } from "../data/settings";
@@ -113,6 +117,8 @@ export default function CustomerProfilePage({ id }: { id: number }) {
               </table></div>
             )}
           </section>
+          {isServerMode && <BillingCard customerId={customer.id} />}
+          {isServerMode && <TimeCard customerId={customer.id} title={t("time.customerTitle")} />}
           {customer.notes && <section className="card"><div className="card-header"><h2>{t("customer.notes")}</h2></div><div className="card-body" style={{ whiteSpace: "pre-wrap" }}>{customer.notes}</div></section>}
         </div>
         <div className="detail-side">
@@ -136,6 +142,7 @@ export default function CustomerProfilePage({ id }: { id: number }) {
               </div>
             </section>
           )}
+          {isServerMode && <ActivityCard customerId={customer.id} />}
         </div>
       </div>
       {editing && <CustomerFormModal customerId={customer.id} initial={toCustomerInput(customer)} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); void load(); }} />}

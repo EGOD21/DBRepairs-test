@@ -42,6 +42,9 @@ const icons = {
   hardDrive: [["path", "M22 12H2M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"], ["path", "M6 16h.01M10 16h.01"]],
   checkSquare: [["rect", 3, 3, 18, 18, 2], ["path", "m9 12 2 2 4-4"]],
   user: [["circle", 12, 8, 4], ["path", "M20 21a8 8 0 0 0-16 0"]],
+  menu: [["path", "M4 6h16M4 12h16M4 18h16"]],
+  activity: [["path", "M22 12h-4l-3 9L9 3l-3 9H2"]],
+  dollar: [["path", "M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"]],
 } satisfies Record<string, Shape[]>;
 
 export type IconName = keyof typeof icons;

@@ -4,7 +4,9 @@ import { PriorityBadge, StatusBadge } from "../components/Badges";
 import { DashboardData, emptyStats, getDashboard } from "../data/dashboard";
 import { isOverdue } from "../data/repairs";
 import { formatDbDate } from "../data/dates";
-import { deviceLabel, formatPlainDate } from "../lib/format";
+import { deviceLabel, formatClock, formatMinutes, formatMoney, formatPlainDate } from "../lib/format";
+import { listTimers, RunningTimer } from "../data/billing";
+import { useSession } from "../session";
 import { useI18n } from "../i18n/I18nProvider";
 import { href, navigate, Route } from "../router";
 
@@ -13,6 +15,8 @@ export default function DashboardPage() {
   const [data, setData] = useState<DashboardData>({ stats: emptyStats, recent: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const { teamFeatures } = useSession();
+  const [timers, setTimers] = useState<RunningTimer[]>([]);
 
   useEffect(() => {
     let active = true;
@@ -20,6 +24,7 @@ export default function DashboardPage() {
       .then((result) => { if (active) setData(result); })
       .catch((cause) => { console.error(cause); if (active) setError(true); })
       .finally(() => { if (active) setLoading(false); });
+    if (teamFeatures) listTimers().then((list) => { if (active) setTimers(list); }).catch(() => {});
     return () => { active = false; };
   }, []);
 
@@ -47,6 +52,24 @@ export default function DashboardPage() {
           </a>
         ))}
       </section>
+      {data.billing && (
+        <section className="stat-grid">
+          <a className="stat" href={href({ name: "billing" })}><span><Icon name="receipt" size={15} />{t("billing.outstanding")}</span><strong>{formatMoney(data.billing.outstanding)}</strong></a>
+          <a className={`stat${data.billing.overdue_invoices ? " danger" : ""}`} href={href({ name: "billing" })}><span><Icon name="alert" size={15} />{t("billing.overdue")}</span><strong>{formatMoney(data.billing.overdue_amount)}</strong></a>
+          <a className={`stat${data.billing.unbilled_minutes ? " warning" : ""}`} href={href({ name: "billing", tab: "time" })}><span><Icon name="clock" size={15} />{t("billing.unbilledTime")}</span><strong>{formatMinutes(data.billing.unbilled_minutes)}</strong></a>
+          <a className="stat" href={href({ name: "billing", tab: "payments" })}><span><Icon name="dollar" size={15} />{t("billing.paidThisMonth")}</span><strong>{formatMoney(data.billing.paid_this_month)}</strong></a>
+        </section>
+      )}
+      {timers.length > 0 && (
+        <section className="card">
+          <div className="card-header"><h2>{t("time.workingNow")}</h2></div>
+          <div className="card-body working-now">{timers.map((timer) => (
+            <a key={timer.user_id} className="working-item" href={timer.repair_id ? href({ name: "repair", id: timer.repair_id }) : href({ name: "customer", id: timer.customer_id })}>
+              <span className="timer-dot" /><strong>{timer.user_name}</strong><span>{timer.repair_number ?? timer.customer_name}</span><span className="muted">{formatClock(timer.elapsed_seconds)}</span>
+            </a>
+          ))}</div>
+        </section>
+      )}
       <section className="card">
         <div className="card-header"><div><h2>{t("dashboard.recent")}</h2></div><a href={href({ name: "repairs" })}>{t("dashboard.viewAll")}</a></div>
         {data.recent.length === 0 ? <div className="empty">{loading ? t("common.loading") : t("repairs.empty")}</div> : (

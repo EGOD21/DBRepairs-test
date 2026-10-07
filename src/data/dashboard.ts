@@ -12,14 +12,17 @@ export type DashboardStats = {
   partsToOrder: number;
 };
 
-export type DashboardData = { stats: DashboardStats; recent: Repair[] };
+/** Server edition only. */
+export type DashboardBilling = { outstanding: number; overdue_amount: number; overdue_invoices: number; unbilled_minutes: number; paid_this_month: number };
+
+export type DashboardData = { stats: DashboardStats; recent: Repair[]; billing?: DashboardBilling };
 
 export const emptyStats: DashboardStats = { openRepairs: 0, waitingCustomer: 0, ready: 0, closedToday: 0, overdue: 0, partsToOrder: 0 };
 
 export async function getDashboard(): Promise<DashboardData> {
   if (isServerMode) {
     const data = await api<DashboardData>("/dashboard");
-    return { stats: { ...emptyStats, ...data.stats }, recent: data.recent.map((r) => ({ ...r, paid: Boolean(r.paid) })) };
+    return { stats: { ...emptyStats, ...data.stats }, billing: data.billing, recent: data.recent.map((r) => ({ ...r, paid: Boolean(r.paid) })) };
   }
   const db = await getDatabase();
   const [counts] = await db.select<Record<keyof DashboardStats, number>[]>(`SELECT

@@ -26,3 +26,14 @@ export function PartStatusBadge({ status }: { status: PartStatus }) {
   const { t } = useI18n();
   return <span className={`badge ${partTone[status]}`}>{t(`part.status.${status}`)}</span>;
 }
+
+const docTone: Record<string, string> = {
+  draft: "", sent: "accent", unpaid: "accent", partial: "warning", overdue: "danger", paid: "success", void: "",
+  approved: "success", declined: "danger", converted: "primary", expired: "warning",
+};
+
+/** Invoice and estimate state: draft, unpaid, partial, overdue, paid, approved… */
+export function DocStateBadge({ state }: { state: string }) {
+  const { t } = useI18n();
+  return <span className={`badge ${docTone[state] ?? ""}`}>{t(`billing.state.${state}`)}</span>;
+}

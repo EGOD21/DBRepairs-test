@@ -5,14 +5,14 @@ export const CONTACT_METHODS = ["email", "phone", "sms"];
 export const PRIORITIES = ["low", "normal", "high", "urgent"];
 export const PART_STATUSES = ["needed", "ordered", "received", "installed", "cancelled"];
 
-function object(value) {
+export function object(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new ValidationError("Expected a JSON object");
   }
   return value;
 }
 
-function text(value, field, { required = false, max = 10000 } = {}) {
+export function text(value, field, { required = false, max = 10000 } = {}) {
   if (value == null) value = "";
   if (typeof value !== "string") throw new ValidationError(`${field} must be text`);
   const trimmed = value.trim();
@@ -21,33 +21,33 @@ function text(value, field, { required = false, max = 10000 } = {}) {
   return trimmed || null;
 }
 
-function id(value, field) {
+export function id(value, field) {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 1) throw new ValidationError(`${field} must be a positive integer`);
   return parsed;
 }
 
-function money(value, field) {
+export function money(value, field) {
   if (value === "" || value == null) return null;
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) throw new ValidationError(`${field} must be a positive number`);
   return parsed;
 }
 
-function wholeNumber(value, field, { min = 0, max = 100000 } = {}) {
+export function wholeNumber(value, field, { min = 0, max = 100000 } = {}) {
   if (value === "" || value == null) return null;
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < min || parsed > max) throw new ValidationError(`${field} must be a whole number`);
   return parsed;
 }
 
-function choice(value, field, options, fallback) {
+export function choice(value, field, options, fallback) {
   if (value === "" || value == null) return fallback;
   if (!options.includes(value)) throw new ValidationError(`${field} must be one of ${options.join(", ")}`);
   return value;
 }
 
-function date(value, field) {
+export function date(value, field) {
   if (value === "" || value == null) return null;
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(value))) {
     throw new ValidationError(`${field} must be a date (YYYY-MM-DD)`);
@@ -55,7 +55,7 @@ function date(value, field) {
   return value;
 }
 
-function flag(value) {
+export function flag(value) {
   return value === true || value === 1 || value === "true";
 }
 
@@ -158,7 +158,22 @@ export const SETTING_LIMITS = {
   "email.signature": 2000,
   // Deletes photos of closed repairs, and archived photos, after this many days (0 = never).
   "photos.autoDeleteDays": 10,
+  // Billing (see billing.js).
+  "billing.currency": 3,
+  "billing.taxRate": 10,
+  "billing.taxLabel": 40,
+  "billing.hourlyRate": 20,
+  "billing.timeRounding": 3,
+  "billing.invoicePrefix": 20,
+  "billing.estimatePrefix": 20,
+  "billing.paymentTermsDays": 5,
+  "billing.estimateValidDays": 5,
+  "billing.invoiceNotes": 2000,
+  "billing.paymentInstructions": 2000,
+  "billing.paymentLink": 1000,
 };
+
+const NUMBER_SETTINGS = ["billing.taxRate", "billing.hourlyRate", "billing.timeRounding", "billing.paymentTermsDays", "billing.estimateValidDays", "photos.autoDeleteDays"];
 
 // Theme values become CSS custom properties, so allow only plain colors,
 // lengths and font names: no url(), no semicolons, no braces.
@@ -186,7 +201,10 @@ export function settingsInput(value) {
       throw new ValidationError("App icons must be PNG images");
     }
     if (key === "ui.theme" && cleaned) validateTheme(cleaned);
+    if (NUMBER_SETTINGS.includes(key) && cleaned && !/^\d{1,6}(\.\d{1,3})?$/.test(cleaned)) throw new ValidationError(`${key} must be a number`);
     if (key === "photos.autoDeleteDays" && cleaned && !/^\d{1,5}$/.test(cleaned)) throw new ValidationError("photos.autoDeleteDays must be a whole number of days");
+    if (key === "billing.currency" && cleaned && !/^[A-Z]{3}$/.test(cleaned)) throw new ValidationError("billing.currency must be a 3-letter code such as USD");
+    if (key === "billing.paymentLink" && cleaned) webUrl(cleaned.replace(/\{(amount|number)\}/g, "0"), key);
     result[key] = cleaned;
   }
   return result;

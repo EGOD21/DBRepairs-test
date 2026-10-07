@@ -4,6 +4,9 @@ import Menu from "../components/Menu";
 import { PriorityBadge, StatusBadge } from "../components/Badges";
 import PartsEditor from "../components/PartsEditor";
 import RepairPhotos from "../components/RepairPhotos";
+import TimeCard from "../components/TimeCard";
+import BillingCard from "../components/BillingCard";
+import ActivityCard from "../components/ActivityCard";
 import DeleteRepairDialog from "../components/DeleteRepairDialog";
 import Modal from "../components/Modal";
 import PhotoPrint from "../print/PhotoPrint";
@@ -199,6 +202,8 @@ export default function RepairDetailPage({ id }: { id: number }) {
               {area("internal_notes", t("repair.internalNotes"), 2)}
             </div>
           </section>
+          {isServerMode && <TimeCard repairId={repair.id} customerId={repair.customer_id} />}
+          {isServerMode && <BillingCard repairId={repair.id} customerId={repair.customer_id} />}
           {isServerMode && <RepairPhotos key={galleryKey} repairId={repair.id} onCountChange={setPhotoCount} onPrint={setPrintingPhotos} />}
           <PartsEditor repairId={repair.id} onChange={() => { void getRepair(id).then((r) => r && setRepair((current) => current ? { ...current, parts_pending: r.parts_pending } : r)); }} />
         </div>
@@ -242,6 +247,7 @@ export default function RepairDetailPage({ id }: { id: number }) {
               {repair.due_date && <p className="muted" style={{ marginTop: 14, fontSize: 12 }}>{t("repair.dueDate")}: {formatPlainDate(repair.due_date)}{isClosed(repair) ? "" : overdue ? ` · ${t("repair.overdue")}` : ""}</p>}
             </div>
           </section>
+          {isServerMode && <ActivityCard key={repair.updated_at ?? ""} repairId={repair.id} />}
         </div>
       </div>
 

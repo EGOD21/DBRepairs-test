@@ -17,6 +17,7 @@ export type Repair = {
   parts_pending: number;
   /** Server edition only; always 0 on the desktop app. */
   photo_count: number;
+  updated_at?: string;
 };
 
 export type RepairInput = {

@@ -16,6 +16,9 @@ import CustomerProfilePage from "./pages/CustomerProfilePage";
 import PartsPage from "./pages/PartsPage";
 import SettingsPage from "./pages/SettingsPage";
 import ChatPage from "./pages/ChatPage";
+import BillingPage from "./pages/BillingPage";
+import InvoicePage from "./pages/InvoicePage";
+import RunningTimerChip from "./components/RunningTimerChip";
 import { SessionProvider, useSession } from "./session";
 import { getLastSeen, unreadCount } from "./data/chat";
 
@@ -62,6 +65,7 @@ function Workspace({ onSignOut }: { onSignOut?: () => void }) {
   const { user, teamFeatures } = useSession();
   const [partsToOrder, setPartsToOrder] = useState(0);
   const [unread, setUnread] = useState(0);
+  const [moreOpen, setMoreOpen] = useState(false);
 
   useEffect(() => {
     listParts("needed").then((parts) => setPartsToOrder(parts.length)).catch(() => setPartsToOrder(0));
@@ -84,15 +88,25 @@ function Workspace({ onSignOut }: { onSignOut?: () => void }) {
     });
   }
 
-  const section = route.name === "repair" ? "repairs" : route.name === "customer" ? "customers" : route.name;
-  const links: { route: Route; icon: IconName; label: string; badge?: number }[] = [
-    { route: { name: "dashboard" }, icon: "dashboard", label: t("nav.dashboard") },
-    { route: { name: "repairs" }, icon: "wrench", label: t("nav.repairs") },
-    { route: { name: "customers" }, icon: "users", label: t("nav.customers") },
+  useEffect(() => { setMoreOpen(false); }, [route]);
+
+  const sections: Partial<Record<Route["name"], Route["name"]>> = { repair: "repairs", customer: "customers", invoice: "billing" };
+  const section = sections[route.name] ?? route.name;
+  // "phone" links sit in the bottom bar on phones; the rest are under More.
+  type NavLink = { route: Route; icon: IconName; label: string; badge?: number; phone?: boolean };
+  const links: NavLink[] = [
+    { route: { name: "dashboard" }, icon: "dashboard", label: t("nav.dashboard"), phone: true },
+    { route: { name: "repairs" }, icon: "wrench", label: t("nav.repairs"), phone: true },
+    { route: { name: "customers" }, icon: "users", label: t("nav.customers"), phone: true },
+    ...(teamFeatures ? [{ route: { name: "billing" } as Route, icon: "receipt" as IconName, label: t("nav.billing"), phone: true }] : []),
     { route: { name: "parts" }, icon: "package", label: t("nav.parts"), badge: partsToOrder || undefined },
     ...(teamFeatures ? [{ route: { name: "chat" } as Route, icon: "message" as IconName, label: t("nav.chat"), badge: unread || undefined }] : []),
     { route: { name: "settings" }, icon: "settings", label: t("nav.settings") },
   ];
+  const phoneLinks = links.filter((link) => link.phone);
+  const moreLinks = links.filter((link) => !link.phone);
+  const moreBadge = moreLinks.reduce((sum, link) => sum + (link.badge ?? 0), 0);
+  const moreActive = moreLinks.some((link) => link.route.name === section);
 
   return (
     <div className={`app-shell${collapsed ? " collapsed" : ""}`}>
@@ -109,6 +123,7 @@ function Workspace({ onSignOut }: { onSignOut?: () => void }) {
           ))}
         </nav>
         <div className="sidebar-footer">
+          {teamFeatures && <RunningTimerChip refreshKey={route} />}
           <div className="sidebar-language">
             <LanguageDropdown locale={locale} setLocale={setLocale} locales={locales} label={t("settings.language")} searchLabel={t("settings.searchLanguage")} />
           </div>
@@ -126,7 +141,7 @@ function Workspace({ onSignOut }: { onSignOut?: () => void }) {
       <header className="mobile-topbar">
         <a className="mobile-brand" href={href({ name: "dashboard" })}><img src={logo} alt="" /><strong className="truncate">{companyName}</strong></a>
         <div className="mobile-topbar-actions">
-          <a className={`btn btn-ghost btn-icon${section === "settings" ? " active" : ""}`} href={href({ name: "settings" })} aria-label={t("nav.settings")}><Icon name="settings" /></a>
+          {teamFeatures && <RunningTimerChip refreshKey={route} />}
           {onSignOut && <button type="button" className="btn btn-ghost btn-icon" onClick={onSignOut} aria-label={t("auth.signOut")}><Icon name="logout" /></button>}
         </div>
       </header>
@@ -139,15 +154,32 @@ function Workspace({ onSignOut }: { onSignOut?: () => void }) {
         {route.name === "parts" && <PartsPage />}
         {route.name === "chat" && (teamFeatures ? <ChatPage /> : <DashboardPage />)}
         {route.name === "settings" && <SettingsPage section={route.section} />}
+        {route.name === "billing" && (teamFeatures ? <BillingPage tab={route.tab} /> : <DashboardPage />)}
+        {route.name === "invoice" && (teamFeatures ? <InvoicePage key={route.id} id={route.id} /> : <DashboardPage />)}
       </main>
       <nav className="bottom-nav" aria-label={t("nav.main")}>
-        {links.filter((link) => link.route.name !== "settings").map((link) => (
+        {phoneLinks.map((link) => (
           <a key={link.route.name} href={href(link.route)} className={section === link.route.name ? "active" : ""} aria-current={section === link.route.name ? "page" : undefined}>
             <span className="bottom-nav-icon"><Icon name={link.icon} size={22} />{link.badge ? <span className="bottom-nav-badge">{link.badge > 99 ? "99+" : link.badge}</span> : null}</span>
             <span className="bottom-nav-label">{link.label}</span>
           </a>
         ))}
+        <button type="button" className={moreActive || moreOpen ? "active" : ""} aria-expanded={moreOpen} onClick={() => setMoreOpen((value) => !value)}>
+          <span className="bottom-nav-icon"><Icon name="menu" size={22} />{moreBadge ? <span className="bottom-nav-badge">{moreBadge > 99 ? "99+" : moreBadge}</span> : null}</span>
+          <span className="bottom-nav-label">{t("nav.more")}</span>
+        </button>
       </nav>
+      {moreOpen && (
+        <div className="more-sheet-backdrop" role="presentation" onClick={() => setMoreOpen(false)}>
+          <nav className="more-sheet" aria-label={t("nav.more")} onClick={(event) => event.stopPropagation()}>
+            {moreLinks.map((link) => (
+              <a key={link.route.name} href={href(link.route)} className={section === link.route.name ? "active" : ""}>
+                <Icon name={link.icon} size={20} /><span>{link.label}</span>{link.badge ? <span className="badge">{link.badge}</span> : null}
+              </a>
+            ))}
+          </nav>
+        </div>
+      )}
     </div>
   );
 }
