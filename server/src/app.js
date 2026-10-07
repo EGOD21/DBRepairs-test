@@ -11,13 +11,16 @@ import { invoiceSelect, registerBillingRoutes } from "./billing.js";
 import { registerContractRoutes, slaHours, startScheduler } from "./contracts.js";
 import { registerReportRoutes } from "./reports.js";
 import { registerRecordRoutes } from "./records.js";
+import { registerShopFloorRoutes } from "./shopfloor.js";
 import { vaultKey } from "./vault.js";
 
 const repairSelect = `SELECT r.*, c.name customer_name, c.email customer_email, c.phone customer_phone, c.mobile customer_mobile,
     c.company customer_company, s.code status_code, s.label_key status_label_key,
     (SELECT COUNT(*) FROM repair_parts p WHERE p.repair_id = r.id AND p.status IN ('needed','ordered'))::integer parts_pending,
     (SELECT COUNT(*) FROM repair_photos ph WHERE ph.repair_id = r.id)::integer photo_count,
-    (SELECT a.name FROM assets a WHERE a.id = r.asset_id) asset_name
+    (SELECT a.name FROM assets a WHERE a.id = r.asset_id) asset_name,
+    (SELECT p.repair_number FROM repairs p WHERE p.id = r.parent_repair_id) parent_repair_number,
+    (SELECT COUNT(*) FROM repairs k WHERE k.parent_repair_id = r.id)::integer comeback_count
   FROM repairs r
   JOIN customers c ON c.id = r.customer_id
   JOIN repair_statuses s ON s.id = r.status_id`;
@@ -59,7 +62,8 @@ const customerValues = (c) => [c.name, c.company, c.taxNumber, c.phone, c.mobile
 
 const publicPaths = new Set(["/api/health", "/api/session", "/api/login", "/api/logout", "/api/branding"]);
 // The installable-app manifest and icons are fetched by the phone before anyone signs in.
-const isPublicPath = (path) => publicPaths.has(path) || path.startsWith("/api/app/");
+// Calendar feeds are read by calendar apps, which cannot sign in; their URL carries a secret token.
+const isPublicPath = (path) => publicPaths.has(path) || path.startsWith("/api/app/") || path.startsWith("/api/calendar/");
 
 // Home-screen icon files: setting key, fallback image in /icons, size.
 const appIcons = {
@@ -123,6 +127,7 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
       return reply.code(error.statusCode).send({ error: error.message });
     }
     if (error.code === "23503") return reply.code(409).send({ error: "This record is still in use" });
+    if (error.code === "23505") return reply.code(409).send({ error: "That already exists (the number or code is taken)" });
     request.log.error(error);
     return reply.code(500).send({ error: "Internal server error" });
   });
@@ -212,6 +217,7 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
   const photoStore = createPhotoStore(config.photosDir);
   registerPhotoRoutes(app, pool, { store: photoStore, requireAdmin, readSettings });
   registerReportRoutes(app, pool, { requireAdmin });
+  registerShopFloorRoutes(app, pool, { requireAdmin, readSettings });
   registerRecordRoutes(app, pool, { requireAdmin, readSettings, store: photoStore, vaultKey: config.vaultKey ?? vaultKey(config.vaultSecret) });
   if (config.backgroundJobs) {
     const stopAutoPrune = startAutoPrune(pool, photoStore, readSettings, app.log);
@@ -452,8 +458,15 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
   });
 
   app.delete("/api/parts/:id", async (request, reply) => {
-    const result = await pool.query("DELETE FROM repair_parts WHERE id=$1 RETURNING repair_id, name", [pathId(request.params.id)]);
+    const result = await pool.query("DELETE FROM repair_parts WHERE id=$1 RETURNING repair_id, name, stock_item_id, quantity, status", [pathId(request.params.id)]);
     if (!result.rowCount) return replyNotFound(reply);
+    // A part taken from stock by mistake goes back on the shelf.
+    const removed = result.rows[0];
+    if (removed.stock_item_id && removed.status === "installed") {
+      await pool.query("UPDATE stock_items SET quantity = quantity + $1, updated_at=now() WHERE id=$2", [removed.quantity, removed.stock_item_id]);
+      await pool.query("INSERT INTO stock_movements (item_id, change, reason, repair_id, user_id, note) VALUES ($1,$2,'returned',$3,$4,'Removed from repair')",
+        [removed.stock_item_id, removed.quantity, removed.repair_id, request.user.id]);
+    }
     await audit(pool, request, { action: "delete", entity: "part", entityId: pathId(request.params.id), repairId: result.rows[0].repair_id, summary: `Part removed: ${result.rows[0].name}` });
     return reply.code(204).send();
   });
@@ -467,7 +480,9 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
         (SELECT COUNT(*) FROM repairs r WHERE r.closed_at IS NOT NULL AND r.closed_at::date = CURRENT_DATE)::integer closed_today,
         (SELECT COUNT(*) FROM repairs r JOIN repair_statuses s ON s.id=r.status_id
           WHERE s.code NOT IN ('DELIVERED','CANCELLED') AND r.due_date < CURRENT_DATE)::integer overdue,
-        (SELECT COUNT(*) FROM repair_parts p WHERE p.status='needed')::integer parts_to_order`),
+        (SELECT COUNT(*) FROM repair_parts p WHERE p.status='needed')::integer parts_to_order,
+        (SELECT COUNT(*) FROM stock_items WHERE active AND reorder_level > 0 AND quantity <= reorder_level)::integer low_stock,
+        (SELECT COUNT(*) FROM supplier_returns WHERE status IN ('to_ship','shipped'))::integer open_returns`),
       pool.query(`${repairSelect} ORDER BY r.id DESC LIMIT 8`),
       pool.query(`SELECT
           COALESCE(SUM(balance) FILTER (WHERE state IN ('unpaid','partial','overdue')), 0)::float8 outstanding,
@@ -480,7 +495,7 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
     const row = counts.rows[0];
     return {
       stats: { openRepairs: row.open_repairs, waitingCustomer: row.waiting_customer, ready: row.ready, closedToday: row.closed_today,
-        overdue: row.overdue, partsToOrder: row.parts_to_order },
+        overdue: row.overdue, partsToOrder: row.parts_to_order, lowStock: row.low_stock, openReturns: row.open_returns },
       billing: money.rows[0],
       recent: recent.rows,
     };

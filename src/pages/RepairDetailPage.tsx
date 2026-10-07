@@ -9,6 +9,8 @@ import BillingCard from "../components/BillingCard";
 import ActivityCard from "../components/ActivityCard";
 import SlaBadge from "../components/SlaBadge";
 import IntakeCard from "../components/IntakeCard";
+import AppointmentModal from "../components/AppointmentModal";
+import { createComeback } from "../data/shopfloor";
 import WipesCard from "../components/WipesCard";
 import { checklistItems, defaultChecklist, RepairSignature } from "../data/records";
 import DeleteRepairDialog from "../components/DeleteRepairDialog";
@@ -51,6 +53,7 @@ export default function RepairDetailPage({ id }: { id: number }) {
   const [deleting, setDeleting] = useState(false);
   const [galleryKey, setGalleryKey] = useState(0);
   const [signatures, setSignatures] = useState<RepairSignature[]>([]);
+  const [scheduling, setScheduling] = useState(false);
   // Shown after a repair is saved as delivered or cancelled while it still has photos.
   const [closePrompt, setClosePrompt] = useState(false);
 
@@ -133,6 +136,17 @@ export default function RepairDetailPage({ id }: { id: number }) {
     }
   }
 
+  async function comeback() {
+    const fault = window.prompt(t("comeback.prompt"), "");
+    if (fault === null) return;
+    try {
+      const created = await createComeback(id, fault);
+      navigate({ name: "repair", id: created.id });
+    } catch (cause) {
+      setMessage({ tone: "error", text: cause instanceof Error ? cause.message : t("common.saveError") });
+    }
+  }
+
   async function printAllPhotos() {
     try {
       setPrintingPhotos(await listRepairPhotos(id));
@@ -173,6 +187,9 @@ export default function RepairDetailPage({ id }: { id: number }) {
             {repair.paid && <span className="badge success">{t("repair.paid")}</span>}
             {repair.maintenance_plan_id && <span className="badge accent"><Icon name="clock" size={12} />{t("maintenance.badge")}</span>}
             <SlaBadge repair={repair} />
+            {repair.parent_repair_id && <a className={`badge ${repair.is_warranty ? "warning" : ""}`} href={href({ name: "repair", id: repair.parent_repair_id })}>
+              <Icon name="back" size={12} />{repair.is_warranty ? t("comeback.warrantyOf") : t("comeback.of")} {repair.parent_repair_number}</a>}
+            {(repair.comeback_count ?? 0) > 0 && <span className="badge danger">{fill(t("comeback.count"), { count: repair.comeback_count ?? 0 })}</span>}
           </div>
           <p><a href={href({ name: "customer", id: repair.customer_id })}>{repair.customer_name}</a> · {t("repair.openedAt")} {formatDbDate(repair.opened_at)}</p>
         </div>
@@ -191,6 +208,10 @@ export default function RepairDetailPage({ id }: { id: number }) {
             </>)}</Menu>
           ) : <button type="button" className="btn" disabled title={t("email.noAddress")}><Icon name="mail" size={16} />{t("email.customer")}</button>}
           {phone && <a className="btn btn-icon" href={telLink(phone)} title={`${t("customer.call")} ${phone}`} aria-label={t("customer.call")}><Icon name="phone" size={16} /></a>}
+          {isServerMode && <Menu label={t("common.more")} variant="btn">{(close) => (<>
+            <button type="button" onClick={() => { close(); setScheduling(true); }}><Icon name="calendar" size={16} /><span>{t("schedule.add")}<small>{t("schedule.fromRepairHint")}</small></span></button>
+            {isClosed(repair) && <button type="button" onClick={() => { close(); void comeback(); }}><Icon name="back" size={16} /><span>{t("comeback.create")}<small>{t("comeback.createHint")}</small></span></button>}
+          </>)}</Menu>}
           <button type="button" className="btn btn-danger" onClick={() => setDeleting(true)}><Icon name="trash" size={16} />{t("common.delete")}</button>
           <button type="button" className="btn btn-primary" onClick={() => void save()} disabled={!dirty || saving || !form.reported_fault.trim()}>{saving ? t("common.saving") : t("common.saveChanges")}</button>
         </div>
@@ -279,6 +300,8 @@ export default function RepairDetailPage({ id }: { id: number }) {
       {printingPhotos && printingPhotos.length > 0 && (
         <PhotoPrint photos={printingPhotos} data={printData} office={officeFromSettings(settings)} onClose={() => setPrintingPhotos(null)} />
       )}
+      {scheduling && <AppointmentModal appointment={null} initial={{ title: `${repair.repair_number} — ${repair.customer_name}`, customer_id: repair.customer_id, repair_id: repair.id }}
+        onClose={() => setScheduling(false)} onSaved={() => setScheduling(false)} />}
       {deleting && <DeleteRepairDialog repair={{ ...repair, photo_count: photoCount }} onClose={() => setDeleting(false)} onDeleted={() => navigate({ name: "repairs" })} />}
       {closePrompt && (
         <Modal title={t("photos.closedTitle")} subtitle={fill(t("photos.closedText"), { count: String(photoCount) })} onClose={() => setClosePrompt(false)}

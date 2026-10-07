@@ -191,9 +191,12 @@ export const SETTING_LIMITS = {
   "intake.waiver": 4000,
   "wipe.prefix": 20,
   "wipe.statement": 2000,
+  // Shop floor (see shopfloor.js).
+  "unclaimed.days": 5,
+  "unclaimed.policy": 2000,
 };
 
-const NUMBER_SETTINGS = ["billing.taxRate", "billing.hourlyRate", "billing.timeRounding", "billing.paymentTermsDays", "billing.estimateValidDays", "photos.autoDeleteDays"];
+const NUMBER_SETTINGS = ["billing.taxRate", "billing.hourlyRate", "billing.timeRounding", "billing.paymentTermsDays", "billing.estimateValidDays", "photos.autoDeleteDays", "unclaimed.days"];
 
 // Theme values become CSS custom properties, so allow only plain colors,
 // lengths and font names: no url(), no semicolons, no braces.

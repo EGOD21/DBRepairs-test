@@ -736,3 +736,38 @@ table.compact td, table.compact th { padding-top: 8px; padding-bottom: 8px; }
   .network-row > .btn { justify-self: end; }
   .signature-pair, .info-list.two { grid-template-columns: 1fr; }
 }
+
+/* ---------- Shop floor: stock picker, schedule ---------- */
+.pick-list { display: grid; gap: 4px; max-height: 320px; overflow-y: auto; }
+.pick-item { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 10px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: var(--surface); color: var(--foreground); font: inherit; text-align: left; cursor: pointer; }
+.pick-item span:first-child { display: grid; min-width: 0; }
+.pick-item:hover { background: var(--surface-muted); }
+.pick-item.active { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 8%, var(--surface)); }
+.pick-item:disabled { opacity: .5; cursor: not-allowed; }
+.pick-meta { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+.week-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); border-top: 1px solid var(--border-soft); }
+.week-day { min-height: 320px; border-right: 1px solid var(--border-soft); display: flex; flex-direction: column; min-width: 0; }
+.week-day:last-child { border-right: 0; }
+.week-day.today { background: color-mix(in srgb, var(--primary) 4%, var(--surface)); }
+.week-day-head { display: flex; align-items: baseline; gap: 6px; padding: 8px 10px; border: 0; border-bottom: 1px solid var(--border-soft); background: none; color: var(--muted-foreground); font: inherit; cursor: pointer; text-align: left; }
+.week-day-head strong { color: var(--foreground); font-size: 16px; }
+.week-day.today .week-day-head strong { color: var(--primary); }
+.week-day-head:hover { background: var(--surface-muted); }
+.week-day-items { display: grid; gap: 6px; padding: 8px; align-content: start; }
+.week-empty { color: var(--border); text-align: center; font-size: 12px; }
+.appointment { display: grid; gap: 1px; padding: 6px 8px; border: 0; border-left: 3px solid var(--primary); border-radius: 6px; background: color-mix(in srgb, var(--primary) 8%, var(--surface)); color: var(--foreground); font: inherit; font-size: 12px; text-align: left; cursor: pointer; min-width: 0; }
+.appointment strong, .appointment span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.appointment.kind-remote { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
+.appointment.kind-dropoff, .appointment.kind-pickup { border-left-color: var(--success); background: color-mix(in srgb, var(--success) 8%, var(--surface)); }
+.appointment.kind-other { border-left-color: var(--muted-foreground); background: var(--surface-muted); }
+.appointment.status-done { opacity: .6; }
+.appointment.status-cancelled { opacity: .5; text-decoration: line-through; }
+.appointment-time { font-weight: 600; font-variant-numeric: tabular-nums; }
+.appointment-meta { color: var(--muted-foreground); }
+.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 13px; }
+@media (max-width: 900px) {
+  .week-grid { grid-template-columns: 1fr; }
+  .week-day { min-height: 0; border-right: 0; border-bottom: 1px solid var(--border-soft); }
+  .week-day-head { border-bottom: 0; }
+  .week-day-items { padding-top: 0; }
+}

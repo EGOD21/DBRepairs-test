@@ -118,7 +118,7 @@ export default function SettingsPage({ section }: { section?: string }) {
 
   const businessKeys: SettingKey[] = ["office.companyName", "office.taxNumber", "office.address", "office.phone", "office.email", "office.website"];
   const printKeys: SettingKey[] = ["print.autoPrint", "print.labelSize", "print.terms"];
-  const intakeKeys: SettingKey[] = ["intake.checklist", "intake.waiver", "vault.techAccess", "wipe.prefix", "wipe.statement"];
+  const intakeKeys: SettingKey[] = ["intake.checklist", "intake.waiver", "vault.techAccess", "wipe.prefix", "wipe.statement", "unclaimed.days"];
   const billingKeys: SettingKey[] = ["billing.currency", "billing.hourlyRate", "billing.taxLabel", "billing.taxRate", "billing.timeRounding", "billing.paymentTermsDays",
     "billing.invoicePrefix", "billing.estimatePrefix", "billing.estimateValidDays", "billing.invoiceNotes", "billing.paymentInstructions", "billing.paymentLink"];
   const groups = useMemo(() => {
@@ -347,6 +347,7 @@ export default function SettingsPage({ section }: { section?: string }) {
                 <small>{t("settings.intakeWaiverHint")}</small></label>
               <label className="check full"><input type="checkbox" checked={settings["vault.techAccess"] !== "0"} onChange={(e) => set("vault.techAccess", e.target.checked ? "1" : "0")} />{t("settings.vaultTechAccess")}</label>
               <p className="hint full">{t("settings.vaultHint")}</p>
+              <label className="field"><span>{t("settings.unclaimedDays")}</span><input type="number" min="1" max="3650" value={settings["unclaimed.days"]} placeholder="30" onChange={(e) => set("unclaimed.days", e.target.value)} /><small>{t("settings.unclaimedDaysHint")}</small></label>
               <label className="field"><span>{t("settings.wipePrefix")}</span><input value={settings["wipe.prefix"]} placeholder="WIPE-" onChange={(e) => set("wipe.prefix", e.target.value)} /></label>
               <label className="field full"><span>{t("settings.wipeStatement")}</span>
                 <textarea rows={4} value={settings["wipe.statement"]} onChange={(e) => set("wipe.statement", e.target.value)} placeholder={t("wipe.defaultStatement")} /></label>

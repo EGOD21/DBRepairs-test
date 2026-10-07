@@ -5,6 +5,9 @@ import { formatDbDate } from "../data/dates";
 import { deviceLabel, fill, formatMoney } from "../lib/format";
 import { useI18n } from "../i18n/I18nProvider";
 import { href } from "../router";
+import { isServerMode } from "../data/runtime";
+import StockTab from "../components/StockTab";
+import ReturnsTab from "../components/ReturnsTab";
 
 export default function PartsPage() {
   const { t } = useI18n();
@@ -12,6 +15,7 @@ export default function PartsPage() {
   const [parts, setParts] = useState<Part[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [tab, setTab] = useState<"order" | "stock" | "returns">("order");
 
   async function load(current = filter) {
     try {
@@ -43,6 +47,14 @@ export default function PartsPage() {
       <header className="page-header">
         <div><h1>{t("parts.title")}</h1><p>{t("parts.subtitle")}</p></div>
       </header>
+      {isServerMode && (
+        <nav className="tabs" aria-label={t("parts.title")}>
+          {(["order", "stock", "returns"] as const).map((name) => <button key={name} type="button" className={tab === name ? "active" : ""} onClick={() => setTab(name)}>{t(`parts.tab.${name}`)}</button>)}
+        </nav>
+      )}
+      {tab === "stock" && <StockTab />}
+      {tab === "returns" && <ReturnsTab />}
+      {tab === "order" && <>
       {error && <div className="alert error">{error}</div>}
       {filter === "open" && toOrder.length > 0 && (
         <div className="alert warning"><Icon name="package" size={16} />{fill(t("parts.toOrderSummary"), { count: toOrder.length, total: formatMoney(orderTotal) })}</div>
@@ -80,6 +92,7 @@ export default function PartsPage() {
           </table></div>
         )}
       </section>
+      </>}
     </div>
   );
 }

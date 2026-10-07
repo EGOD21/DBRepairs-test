@@ -8,7 +8,7 @@ export const settingKeys = [
   "app.icon192", "app.icon512", "app.iconMaskable", "app.iconApple", "photos.autoDeleteDays",
   "billing.currency", "billing.taxRate", "billing.taxLabel", "billing.hourlyRate", "billing.timeRounding", "billing.invoicePrefix",
   "billing.estimatePrefix", "billing.paymentTermsDays", "billing.estimateValidDays", "billing.invoiceNotes", "billing.paymentInstructions",
-  "billing.paymentLink", "vault.techAccess", "intake.checklist", "intake.waiver", "wipe.prefix", "wipe.statement",
+  "billing.paymentLink", "vault.techAccess", "intake.checklist", "intake.waiver", "wipe.prefix", "wipe.statement", "unclaimed.days",
 ] as const;
 
 export type SettingKey = typeof settingKeys[number];

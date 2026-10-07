@@ -25,6 +25,10 @@ export type Repair = {
   asset_name?: string | null;
   intake_checklist?: Record<string, boolean> | null;
   data_backup?: "requested" | "declined" | "not_needed" | null;
+  parent_repair_id?: number | null;
+  parent_repair_number?: string | null;
+  is_warranty?: boolean;
+  comeback_count?: number;
 };
 
 export type RepairInput = {

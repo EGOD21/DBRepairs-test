@@ -10,6 +10,8 @@ export type DashboardStats = {
   closedToday: number;
   overdue: number;
   partsToOrder: number;
+  lowStock?: number;
+  openReturns?: number;
 };
 
 /** Server edition only. */

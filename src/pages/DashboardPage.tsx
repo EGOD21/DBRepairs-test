@@ -8,6 +8,8 @@ import { deviceLabel, formatClock, formatMinutes, formatMoney, formatPlainDate }
 import { listTimers, RunningTimer } from "../data/billing";
 import { Contract, listContracts, listSla, SlaRepair } from "../data/contracts";
 import { UsageMeter } from "../components/ContractsCard";
+import { listUnclaimed, markReminded, UnclaimedRepair } from "../data/shopfloor";
+import { mailtoLink, smsLink } from "../lib/email";
 import { fill } from "../lib/format";
 import { useSession } from "../session";
 import { useI18n } from "../i18n/I18nProvider";
@@ -22,6 +24,7 @@ export default function DashboardPage() {
   const [timers, setTimers] = useState<RunningTimer[]>([]);
   const [sla, setSla] = useState<SlaRepair[]>([]);
   const [contracts, setContracts] = useState<Contract[]>([]);
+  const [unclaimed, setUnclaimed] = useState<UnclaimedRepair[]>([]);
 
   useEffect(() => {
     let active = true;
@@ -33,6 +36,7 @@ export default function DashboardPage() {
       listTimers().then((list) => { if (active) setTimers(list); }).catch(() => {});
       listSla().then((list) => { if (active) setSla(list); }).catch(() => {});
       listContracts({ active: true }).then((list) => { if (active) setContracts(list); }).catch(() => {});
+      listUnclaimed().then((list) => { if (active) setUnclaimed(list); }).catch(() => {});
     }
     return () => { active = false; };
   }, []);
@@ -48,6 +52,10 @@ export default function DashboardPage() {
     { label: t("dashboard.waitingCustomer"), value: data.stats.waitingCustomer, icon: "clock", to: { name: "repairs", filter: "WAITING_CUSTOMER" } },
     { label: t("dashboard.overdue"), value: data.stats.overdue, icon: "alert", to: { name: "repairs", filter: "overdue" }, tone: data.stats.overdue ? "danger" : "" },
     { label: t("dashboard.partsToOrder"), value: data.stats.partsToOrder, icon: "package", to: { name: "parts" }, tone: data.stats.partsToOrder ? "warning" : "" },
+    ...(teamFeatures ? [
+      { label: t("stock.lowTile"), value: data.stats.lowStock ?? 0, icon: "package" as IconName, to: { name: "parts" } as Route, tone: data.stats.lowStock ? "warning" : "" },
+      { label: t("return.openTile"), value: data.stats.openReturns ?? 0, icon: "back" as IconName, to: { name: "parts" } as Route },
+    ] : []),
     { label: t("dashboard.closedToday"), value: data.stats.closedToday, icon: "check", to: { name: "repairs", filter: "closed" } },
   ];
 
@@ -84,6 +92,25 @@ export default function DashboardPage() {
               <strong>{item.repair_number}</strong><span>{item.customer_name}</span><span className="muted">{deviceLabel(item)}</span>
             </a>
           ))}</div>
+        </section>
+      )}
+      {unclaimed.length > 0 && (
+        <section className="card">
+          <div className="card-header"><div><h2>{t("unclaimed.title")}</h2><p>{t("unclaimed.hint")}</p></div></div>
+          <div className="table-wrap"><table className="responsive compact">
+            <tbody>{unclaimed.map((item) => (
+              <tr key={item.id}>
+                <td className="cell-title"><strong><a href={href({ name: "repair", id: item.id })}>{item.repair_number}</a></strong> <span className="muted">{item.customer_name}</span></td>
+                <td data-label={t("unclaimed.waiting")}><span className={`badge ${item.days_waiting > 60 ? "danger" : "warning"}`}>{fill(t("unclaimed.days"), { days: item.days_waiting })}</span></td>
+                <td data-label={t("unclaimed.reminded")} className="muted">{item.pickup_reminded_at ? formatDbDate(item.pickup_reminded_at) : t("unclaimed.never")}</td>
+                <td className="actions"><div className="page-actions">
+                  {item.customer_email && <a className="btn btn-sm" href={mailtoLink(item.customer_email, fill(t("unclaimed.emailSubject"), { number: item.repair_number }), fill(t("unclaimed.emailBody"), { name: item.customer_name.split(/\s+/)[0], number: item.repair_number, days: item.days_waiting, device: deviceLabel(item) }))}
+                    onClick={() => void markReminded(item.id).then(() => setUnclaimed((list) => list.map((u) => u.id === item.id ? { ...u, pickup_reminded_at: new Date().toISOString() } : u)))}><Icon name="mail" size={14} />{t("unclaimed.remind")}</a>}
+                  {item.customer_phone && <a className="btn btn-sm btn-icon" href={smsLink(item.customer_phone)} aria-label={t("customer.text")} onClick={() => void markReminded(item.id)}><Icon name="message" size={14} /></a>}
+                </div></td>
+              </tr>
+            ))}</tbody>
+          </table></div>
         </section>
       )}
       {attention.length > 0 && (

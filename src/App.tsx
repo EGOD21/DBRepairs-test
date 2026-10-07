@@ -20,6 +20,7 @@ import BillingPage from "./pages/BillingPage";
 import InvoicePage from "./pages/InvoicePage";
 import ReportsPage from "./pages/ReportsPage";
 import AssetPage from "./pages/AssetPage";
+import SchedulePage from "./pages/SchedulePage";
 import RunningTimerChip from "./components/RunningTimerChip";
 import { SessionProvider, useSession } from "./session";
 import { getLastSeen, unreadCount } from "./data/chat";
@@ -101,6 +102,7 @@ function Workspace({ onSignOut }: { onSignOut?: () => void }) {
     { route: { name: "repairs" }, icon: "wrench", label: t("nav.repairs"), phone: true },
     { route: { name: "customers" }, icon: "users", label: t("nav.customers"), phone: true },
     ...(teamFeatures ? [{ route: { name: "billing" } as Route, icon: "receipt" as IconName, label: t("nav.billing"), phone: true }] : []),
+    ...(teamFeatures ? [{ route: { name: "schedule" } as Route, icon: "calendar" as IconName, label: t("nav.schedule") }] : []),
     { route: { name: "parts" }, icon: "package", label: t("nav.parts"), badge: partsToOrder || undefined },
     ...(teamFeatures && isAdmin ? [{ route: { name: "reports" } as Route, icon: "chart" as IconName, label: t("nav.reports") }] : []),
     ...(teamFeatures ? [{ route: { name: "chat" } as Route, icon: "message" as IconName, label: t("nav.chat"), badge: unread || undefined }] : []),
@@ -158,6 +160,7 @@ function Workspace({ onSignOut }: { onSignOut?: () => void }) {
         {route.name === "chat" && (teamFeatures ? <ChatPage /> : <DashboardPage />)}
         {route.name === "settings" && <SettingsPage section={route.section} />}
         {route.name === "billing" && (teamFeatures ? <BillingPage tab={route.tab} /> : <DashboardPage />)}
+        {route.name === "schedule" && (teamFeatures ? <SchedulePage /> : <DashboardPage />)}
         {route.name === "asset" && (teamFeatures ? <AssetPage key={route.id} id={route.id} /> : <DashboardPage />)}
         {route.name === "reports" && (teamFeatures && isAdmin ? <ReportsPage /> : <DashboardPage />)}
         {route.name === "invoice" && (teamFeatures ? <InvoicePage key={route.id} id={route.id} /> : <DashboardPage />)}

@@ -14,6 +14,7 @@ export type Route =
   | { name: "invoice"; id: number }
   | { name: "reports" }
   | { name: "asset"; id: number }
+  | { name: "schedule" }
   | { name: "settings"; section?: string };
 
 export function parseRoute(hash: string): Route {
@@ -27,6 +28,7 @@ export function parseRoute(hash: string): Route {
     case "parts": return { name: "parts" };
     case "chat": return { name: "chat" };
     case "reports": return { name: "reports" };
+    case "schedule": return { name: "schedule" };
     case "assets": return id && Number.isInteger(number) && number > 0 ? { name: "asset", id: number } : { name: "customers" };
     case "billing": return id && /^[a-z]+$/.test(id) ? { name: "billing", tab: id } : { name: "billing" };
     case "invoices": return id && Number.isInteger(number) && number > 0 ? { name: "invoice", id: number } : { name: "billing" };
@@ -47,6 +49,7 @@ export function href(route: Route): string {
     case "billing": return route.tab ? `#/billing/${route.tab}` : "#/billing";
     case "invoice": return `#/invoices/${route.id}`;
     case "reports": return "#/reports";
+    case "schedule": return "#/schedule";
     case "asset": return `#/assets/${route.id}`;
     case "settings": return route.section ? `#/settings/${route.section}` : "#/settings";
   }
