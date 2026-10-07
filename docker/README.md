@@ -98,7 +98,9 @@ In TrueNAS:
 6. Save and wait for the containers to start. `db-init` stops after a few seconds; that is expected.
 7. Open `http://TRUENAS-IP:31500` and sign in.
 
-To update later, change the version number on both `image:` lines (for example `0.3.0` → `0.3.1`) and save.
+To update later, change the version number on both `image:` lines (for example `0.6.0` → `0.7.0`) and save.
+
+The optional features in [Optional features (0.7)](#optional-features-07) work the same way on TrueNAS: put the values on the `api` service's `environment:` lines in the YAML (the off-site rclone service is for the plain Docker Compose setup; on TrueNAS use **Data Protection → Cloud Sync Tasks** on the `dbrepairs-backups` and `dbrepairs-photos` datasets instead).
 
 TrueNAS custom YAML apps currently use a generic icon in the Apps list. The DBRepairs web interface and browser favicon use `dbrepairs-icon-square.png`.
 
@@ -194,6 +196,102 @@ docker compose up -d               # recreates the api with a new, empty photos 
 ```
 
 `docker compose stop` / `start` and `docker compose down` (without `--volumes`) never touch the photos.
+
+## Optional features (0.7)
+
+Everything in this section is **off until you set it up**. The app works without any of it.
+
+```text
+.env setting          what it turns on
+────────────────────  ──────────────────────────────────────────────
+VAULT_KEY             encrypted password vault on customer profiles
+SMTP_*                email sent by the server (instead of your mail app)
+TWILIO_*              text messages (SMS)
+OFFSITE_REMOTE        nightly copy of backups + photos to cloud storage
+Settings screen       what it turns on
+────────────────────  ──────────────────────────────────────────────
+Notifications         automatic "received" / "ready" customer messages,
+                      the public repair status page
+My account            phone notifications for each staff member
+```
+
+After changing `.env`, apply it with `docker compose up -d` (this recreates only the containers whose settings changed; your data stays).
+
+### Password vault (`VAULT_KEY`)
+
+Customer logins (router admin, Wi-Fi, server iDRAC…) are stored encrypted with AES-256-GCM. The key comes from `VAULT_KEY`, never from the database, so a stolen backup does not reveal them.
+
+```bash
+openssl rand -base64 32      # paste the result after VAULT_KEY= in .env
+docker compose up -d
+```
+
+Keep a copy of the key somewhere safe (a password manager). **If the key is lost or changed, saved passwords cannot be read.** Every time someone reveals a password it is written to the activity log. Admins can stop technicians from seeing the vault in **Settings → Intake & vault**.
+
+### Email and text messages
+
+Without these settings, email buttons open your own email app, as before. With them, DBRepairs sends the message itself and keeps a copy under **Messages sent** on the repair and the customer.
+
+```ini
+SMTP_HOST=smtp.office365.com     # or smtp.gmail.com, your host's SMTP server…
+SMTP_PORT=587                    # 587 = STARTTLS, 465 = TLS, 25 = plain
+SMTP_USER=shop@example.com
+SMTP_PASSWORD=app-password       # Gmail / Microsoft 365: create an "app password"
+SMTP_FROM=Your Shop <shop@example.com>
+
+TWILIO_ACCOUNT_SID=AC…           # optional, from console.twilio.com
+TWILIO_AUTH_TOKEN=…
+TWILIO_FROM=+15550001234         # your Twilio number
+```
+
+Then in **Settings → Notifications** the channels show *ready*, and you can turn on automatic messages when a repair is booked in and when it is ready for pickup. Customers whose preferred contact is SMS get a text; everyone else gets an email.
+
+### Customer status page (Tailscale Funnel)
+
+Each repair can have a private link like `https://shop.tail1234.ts.net:8443/status/Xk3…` that shows the customer the repair number, device, status, dates and any balance due. Nothing else becomes public.
+
+The rest of DBRepairs stays private on your tailnet. Tailscale Funnel publishes **only the `/status` path** to the internet, on port 8443 (your normal Tailscale Serve address on 443 is unchanged):
+
+```bash
+# on the DBRepairs server, once
+sudo tailscale funnel --bg --https=8443 --set-path=/status http://127.0.0.1:8080/status
+tailscale funnel status          # shows the public address
+```
+
+Funnel must be allowed for this machine in the Tailscale admin console (Access controls → `nodeAttrs` → `funnel`); the command prints a link if it is not. Then in **Settings → Notifications** tick *Let customers check their repair*, enter the public address without a path (for example `https://shop.tail1234.ts.net:8443`) and save. The link appears on the repair page, in automatic messages and on printed receipts and intake sheets. To stop publishing: `sudo tailscale funnel --https=8443 off`.
+
+### Phone notifications
+
+Each person opens **Settings → My account → Phone notifications → Turn on for this device**, on each phone or computer. They are notified when a repair is assigned to them, when a chat message arrives and when a repair is about to miss its SLA.
+
+- This needs HTTPS, which Tailscale Serve already gives you.
+- On iPhone and iPad (iOS 16.4+), first add DBRepairs to the Home Screen (Share → Add to Home Screen) and turn notifications on from the installed app.
+- Nothing needs to be configured on the server: it creates its own signing keys on first use.
+
+### Calendar feeds
+
+**Schedule → Add to my phone calendar** gives each person a private calendar address with their appointments. Apple Calendar, Outlook and Thunderbird on devices in your tailnet can subscribe to it. Google Calendar fetches feeds from Google's own servers, which cannot reach a private tailnet address. **New link** makes the old address stop working.
+
+### Off-site backups (rclone)
+
+The `offsite` service copies the database dumps and the photos to cloud storage (Backblaze B2, Amazon S3, Google Drive, another server over SFTP and [many more](https://rclone.org/overview/)) once a day. It only runs when started with the `offsite` profile.
+
+1. Create the remote once (an interactive question-and-answer setup; give it a short name such as `b2`):
+
+   ```bash
+   docker compose run --rm --entrypoint rclone offsite config
+   ```
+
+   The answers are saved in `rclone/rclone.conf` next to `compose.yaml`. That file contains storage passwords: it is excluded from git, so keep a copy of it in your password manager.
+2. In `.env`, set the destination: `OFFSITE_REMOTE=b2:my-bucket/dbrepairs`.
+3. Start it, and check the first copy:
+
+   ```bash
+   docker compose --profile offsite up -d
+   docker compose logs -f offsite
+   ```
+
+The copy mirrors the folders: when the server deletes an expired dump, the off-site copy deletes it too. Turn on versioning or object lock in your bucket if you want older copies kept longer.
 
 ## Operations
 
