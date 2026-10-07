@@ -3,12 +3,18 @@ import Icon from "../components/Icon";
 import Menu from "../components/Menu";
 import { PriorityBadge, StatusBadge } from "../components/Badges";
 import PartsEditor from "../components/PartsEditor";
+import RepairPhotos from "../components/RepairPhotos";
+import DeleteRepairDialog from "../components/DeleteRepairDialog";
+import Modal from "../components/Modal";
+import PhotoPrint from "../print/PhotoPrint";
+import { deleteRepairPhotos, listRepairPhotos, RepairPhoto } from "../data/photos";
+import { isServerMode } from "../data/runtime";
 import PrintCenter from "../print/PrintCenter";
 import { officeFromSettings, takeAutoPrint, toPrintData } from "../print/data";
 import { defaultLabelSize, TicketKind } from "../print/types";
 import { Customer, listCustomers } from "../data/customers";
 import {
-  deleteRepair, getRepair, isClosed, isOverdue, listRepairStatusHistory, listStatuses, priorities, Repair, RepairStatus,
+  closedStatusCodes, getRepair, isClosed, isOverdue, listRepairStatusHistory, listStatuses, priorities, Repair, RepairStatus,
   RepairStatusHistory, RepairUpdateInput, toUpdateInput, updateRepair,
 } from "../data/repairs";
 import { AppSettings, emptySettings, getSettings } from "../data/settings";
@@ -33,11 +39,18 @@ export default function RepairDetailPage({ id }: { id: number }) {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ tone: "error" | "success"; text: string } | null>(null);
   const [printing, setPrinting] = useState<{ kind: TicketKind; auto: boolean } | null>(null);
+  const [printingPhotos, setPrintingPhotos] = useState<RepairPhoto[] | null>(null);
+  const [photoCount, setPhotoCount] = useState(0);
+  const [deleting, setDeleting] = useState(false);
+  const [galleryKey, setGalleryKey] = useState(0);
+  // Shown after a repair is saved as delivered or cancelled while it still has photos.
+  const [closePrompt, setClosePrompt] = useState(false);
 
   async function load() {
     const [r, h] = await Promise.all([getRepair(id), listRepairStatusHistory(id)]);
     if (!r) { setNotFound(true); return; }
     setRepair(r);
+    setPhotoCount(r.photo_count);
     setForm(toUpdateInput(r));
     setHistory(h);
     setStatusNote("");
@@ -83,10 +96,12 @@ export default function RepairDetailPage({ id }: { id: number }) {
   async function save() {
     if (!form || !form.reported_fault.trim() || saving) return;
     setSaving(true); setMessage(null);
+    const closing = !isClosed(repair!) && closedStatusCodes.includes(statuses.find((s) => s.id === form.status_id)?.code ?? "");
     try {
       await updateRepair(id, form, statusNote);
       await load();
       setMessage({ tone: "success", text: t("common.saved") });
+      if (closing && isServerMode && photoCount > 0) setClosePrompt(true);
     } catch (cause) {
       console.error(cause);
       setMessage({ tone: "error", text: cause instanceof Error && cause.message ? cause.message : t("common.saveError") });
@@ -95,14 +110,26 @@ export default function RepairDetailPage({ id }: { id: number }) {
     }
   }
 
-  async function remove() {
-    if (!repair || !window.confirm(fill(t("repair.deleteConfirm"), { number: repair.repair_number }))) return;
+  async function removeClosedPhotos() {
     try {
-      await deleteRepair(repair.id);
-      navigate({ name: "repairs" });
+      await deleteRepairPhotos(id);
+      setPhotoCount(0);
+      setClosePrompt(false);
+      // Remount the gallery so it shows the empty state.
+      setRepair((current) => (current ? { ...current, photo_count: 0 } : current));
+      setGalleryKey((key) => key + 1);
     } catch (cause) {
       console.error(cause);
-      setMessage({ tone: "error", text: t("repair.deleteError") });
+      setMessage({ tone: "error", text: t("photos.deleteError") });
+      setClosePrompt(false);
+    }
+  }
+
+  async function printAllPhotos() {
+    try {
+      setPrintingPhotos(await listRepairPhotos(id));
+    } catch {
+      setMessage({ tone: "error", text: t("photos.loadError") });
     }
   }
 
@@ -132,6 +159,7 @@ export default function RepairDetailPage({ id }: { id: number }) {
             <button type="button" onClick={() => { close(); setPrinting({ kind: "intake", auto: false }); }}><Icon name="file" size={16} /><span>{t("print.kind.intake")}<small>{t("print.kind.intakeHint")}</small></span></button>
             <button type="button" onClick={() => { close(); setPrinting({ kind: "label", auto: false }); }}><Icon name="barcode" size={16} /><span>{t("print.kind.label")}<small>{t("print.kind.labelHint")}</small></span></button>
             <button type="button" onClick={() => { close(); setPrinting({ kind: "receipt", auto: false }); }}><Icon name="receipt" size={16} /><span>{t("print.kind.receipt")}<small>{t("print.kind.receiptHint")}</small></span></button>
+            {isServerMode && photoCount > 0 && <button type="button" onClick={() => { close(); void printAllPhotos(); }}><Icon name="image" size={16} /><span>{t("photos.title")}<small>{fill(t("photos.printHint"), { count: String(photoCount) })}</small></span></button>}
           </>)}</Menu>
           {repair.customer_email ? (
             <Menu label={t("email.customer")} icon="mail">{(close) => (<>
@@ -141,7 +169,7 @@ export default function RepairDetailPage({ id }: { id: number }) {
             </>)}</Menu>
           ) : <button type="button" className="btn" disabled title={t("email.noAddress")}><Icon name="mail" size={16} />{t("email.customer")}</button>}
           {phone && <a className="btn btn-icon" href={telLink(phone)} title={`${t("customer.call")} ${phone}`} aria-label={t("customer.call")}><Icon name="phone" size={16} /></a>}
-          <button type="button" className="btn btn-danger" onClick={() => void remove()}><Icon name="trash" size={16} />{t("common.delete")}</button>
+          <button type="button" className="btn btn-danger" onClick={() => setDeleting(true)}><Icon name="trash" size={16} />{t("common.delete")}</button>
           <button type="button" className="btn btn-primary" onClick={() => void save()} disabled={!dirty || saving || !form.reported_fault.trim()}>{saving ? t("common.saving") : t("common.saveChanges")}</button>
         </div>
       </header>
@@ -171,6 +199,7 @@ export default function RepairDetailPage({ id }: { id: number }) {
               {area("internal_notes", t("repair.internalNotes"), 2)}
             </div>
           </section>
+          {isServerMode && <RepairPhotos key={galleryKey} repairId={repair.id} onCountChange={setPhotoCount} onPrint={setPrintingPhotos} />}
           <PartsEditor repairId={repair.id} onChange={() => { void getRepair(id).then((r) => r && setRepair((current) => current ? { ...current, parts_pending: r.parts_pending } : r)); }} />
         </div>
 
@@ -219,6 +248,21 @@ export default function RepairDetailPage({ id }: { id: number }) {
       {printing && (
         <PrintCenter data={toPrintData(repair)} office={officeFromSettings(settings)} initialKind={printing.kind}
           labelSize={settings["print.labelSize"] || defaultLabelSize} autoPrint={printing.auto} onClose={() => setPrinting(null)} />
+      )}
+      {printingPhotos && printingPhotos.length > 0 && (
+        <PhotoPrint photos={printingPhotos} data={toPrintData(repair)} office={officeFromSettings(settings)} onClose={() => setPrintingPhotos(null)} />
+      )}
+      {deleting && <DeleteRepairDialog repair={{ ...repair, photo_count: photoCount }} onClose={() => setDeleting(false)} onDeleted={() => navigate({ name: "repairs" })} />}
+      {closePrompt && (
+        <Modal title={t("photos.closedTitle")} subtitle={fill(t("photos.closedText"), { count: String(photoCount) })} onClose={() => setClosePrompt(false)}
+          footer={<>
+            <button type="button" className="btn" onClick={() => setClosePrompt(false)}>{t("photos.keep")}</button>
+            <button type="button" className="btn btn-danger" onClick={() => void removeClosedPhotos()}><Icon name="trash" size={16} />{t("photos.deleteNow")}</button>
+          </>}>
+          <div className="modal-body"><p className="muted">{Number(settings["photos.autoDeleteDays"]) > 0
+            ? fill(t("photos.closedAutoHint"), { days: settings["photos.autoDeleteDays"] })
+            : t("photos.closedManualHint")}</p></div>
+        </Modal>
       )}
     </div>
   );

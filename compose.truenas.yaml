@@ -64,7 +64,7 @@ services:
   api:
     # Built from your fork by .github/workflows/docker-publish.yml.
     # To update, change the version number on both image lines.
-    image: ghcr.io/egod21/dbrepairs-api:0.5.1
+    image: ghcr.io/egod21/dbrepairs-api:0.6.0
     restart: unless-stopped
     environment:
       PGHOST: db
@@ -91,7 +91,7 @@ services:
     networks: [internal]
 
   web:
-    image: ghcr.io/egod21/dbrepairs-web:0.5.1
+    image: ghcr.io/egod21/dbrepairs-web:0.6.0
     restart: unless-stopped
     ports:
       - "31500:8080"

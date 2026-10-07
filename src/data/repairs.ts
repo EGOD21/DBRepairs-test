@@ -15,6 +15,8 @@ export type Repair = {
   estimated_value: number | null; final_value: number | null; internal_notes: string | null; opened_at: string; closed_at: string | null;
   priority: Priority; due_date: string | null; technician: string | null; deposit: number | null; paid: boolean; warranty_days: number | null;
   parts_pending: number;
+  /** Server edition only; always 0 on the desktop app. */
+  photo_count: number;
 };
 
 export type RepairInput = {
@@ -68,7 +70,7 @@ export function isOverdue(repair: Pick<Repair, "status_code" | "due_date">, toda
 
 // SQLite returns 0/1 for booleans.
 function normalize(row: Repair): Repair {
-  return { ...row, paid: Boolean(row.paid), priority: row.priority || "normal", parts_pending: Number(row.parts_pending ?? 0) };
+  return { ...row, paid: Boolean(row.paid), priority: row.priority || "normal", parts_pending: Number(row.parts_pending ?? 0), photo_count: Number(row.photo_count ?? 0) };
 }
 
 export const desktopRepairSelect = `SELECT r.*, c.name customer_name, c.email customer_email, c.phone customer_phone, c.mobile customer_mobile,
@@ -139,7 +141,8 @@ export async function updateRepair(id: number, input: RepairUpdateInput, statusN
   await invoke("update_repair", { id, repair: desktopFields(input), statusNote });
 }
 
-export async function deleteRepair(id: number): Promise<void> {
-  if (isServerMode) return api(`/repairs/${id}`, { method: "DELETE" });
+/** On the server edition, photos are deleted too unless `photos` is "keep" (then they are archived). */
+export async function deleteRepair(id: number, photos: "delete" | "keep" = "delete"): Promise<void> {
+  if (isServerMode) return api(`/repairs/${id}?photos=${photos}`, { method: "DELETE" });
   await invoke("delete_repair", { id });
 }

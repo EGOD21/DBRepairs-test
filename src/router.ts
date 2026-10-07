@@ -10,7 +10,7 @@ export type Route =
   | { name: "customer"; id: number }
   | { name: "parts" }
   | { name: "chat" }
-  | { name: "settings" };
+  | { name: "settings"; section?: string };
 
 export function parseRoute(hash: string): Route {
   const [path, query = ""] = hash.replace(/^#\/?/, "").split("?");
@@ -22,7 +22,7 @@ export function parseRoute(hash: string): Route {
     case "customers": return id && Number.isInteger(number) && number > 0 ? { name: "customer", id: number } : { name: "customers", filter };
     case "parts": return { name: "parts" };
     case "chat": return { name: "chat" };
-    case "settings": return { name: "settings" };
+    case "settings": return id && /^[a-z]+$/.test(id) ? { name: "settings", section: id } : { name: "settings" };
     default: return { name: "dashboard" };
   }
 }
@@ -36,7 +36,7 @@ export function href(route: Route): string {
     case "customer": return `#/customers/${route.id}`;
     case "parts": return "#/parts";
     case "chat": return "#/chat";
-    case "settings": return "#/settings";
+    case "settings": return route.section ? `#/settings/${route.section}` : "#/settings";
   }
 }
 

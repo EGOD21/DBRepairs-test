@@ -2,7 +2,8 @@ import { KeyboardEvent, useEffect, useMemo, useState } from "react";
 import Icon from "../components/Icon";
 import { PriorityBadge, StatusBadge } from "../components/Badges";
 import RepairCreateModal from "../components/RepairCreateModal";
-import { deleteRepair, isClosed, isOverdue, listRepairs, listStatuses, priorities, Priority, Repair, RepairStatus } from "../data/repairs";
+import DeleteRepairDialog from "../components/DeleteRepairDialog";
+import { isClosed, isOverdue, listRepairs, listStatuses, priorities, Priority, Repair, RepairStatus } from "../data/repairs";
 import { getSettings } from "../data/settings";
 import { formatDbDate } from "../data/dates";
 import { deviceLabel, fill, formatPlainDate } from "../lib/format";
@@ -25,6 +26,7 @@ export default function RepairsPage({ filter }: { filter?: string }) {
   const [scope, setScope] = useState<Scope>("all");
   const [creating, setCreating] = useState<{ customerId?: number } | null>(null);
   const [autoPrint, setAutoPrint] = useState("none");
+  const [deleting, setDeleting] = useState<Repair | null>(null);
 
   async function load() {
     try {
@@ -82,17 +84,6 @@ export default function RepairsPage({ filter }: { filter?: string }) {
     if (target) navigate({ name: "repair", id: target.id });
   }
 
-  async function remove(repair: Repair) {
-    if (!window.confirm(fill(t("repair.deleteConfirm"), { number: repair.repair_number }))) return;
-    try {
-      await deleteRepair(repair.id);
-      setRepairs((list) => list.filter((r) => r.id !== repair.id));
-    } catch (cause) {
-      console.error(cause);
-      setError(t("repair.deleteError"));
-    }
-  }
-
   function created(id: number, print: boolean) {
     if (print) {
       const kind: TicketKind = autoPrint === "label" || autoPrint === "receipt" ? autoPrint : "intake";
@@ -145,14 +136,14 @@ export default function RepairsPage({ filter }: { filter?: string }) {
                   <td data-label={t("repair.number")} className="cell-title nowrap"><strong><a href={href({ name: "repair", id: r.id })}>{r.repair_number}</a></strong></td>
                   <td data-label={t("repair.customer")}><div>{r.customer_name}{r.customer_company && <div className="muted" style={{ fontSize: 12 }}>{r.customer_company}</div>}</div></td>
                   <td data-label={t("repair.device")}>{deviceLabel(r)}</td>
-                  <td data-label={t("repair.status")}><div className="title-row"><StatusBadge code={r.status_code} labelKey={r.status_label_key} /><PriorityBadge priority={r.priority} quiet />{r.parts_pending > 0 && <span className="badge warning" title={t("parts.pending")}><Icon name="package" size={12} />{r.parts_pending}</span>}</div></td>
+                  <td data-label={t("repair.status")}><div className="title-row"><StatusBadge code={r.status_code} labelKey={r.status_label_key} /><PriorityBadge priority={r.priority} quiet />{r.parts_pending > 0 && <span className="badge warning" title={t("parts.pending")}><Icon name="package" size={12} />{r.parts_pending}</span>}{r.photo_count > 0 && <span className="badge" title={t("photos.title")}><Icon name="camera" size={12} />{r.photo_count}</span>}</div></td>
                   <td data-label={t("repair.dueDate")} className="nowrap" style={overdue ? { color: "var(--danger)", fontWeight: 600 } : undefined}>{formatPlainDate(r.due_date)}</td>
                   <td data-label={t("repair.technician")} className="muted">{r.technician || "—"}</td>
                   <td data-label={t("repair.openedAt")} className="nowrap muted">{formatDbDate(r.opened_at)}</td>
                   <td className="actions" onClick={(e) => e.stopPropagation()}>
                     <div className="row-actions">
                       <a className="btn btn-sm" href={href({ name: "repair", id: r.id })}>{t("repair.open")}</a>
-                      <button type="button" className="btn btn-sm btn-icon btn-danger" title={t("common.delete")} aria-label={t("common.delete")} onClick={() => void remove(r)}><Icon name="trash" size={15} /></button>
+                      <button type="button" className="btn btn-sm btn-icon btn-danger" title={t("common.delete")} aria-label={t("common.delete")} onClick={() => setDeleting(r)}><Icon name="trash" size={15} /></button>
                     </div>
                   </td>
                 </tr>
@@ -162,6 +153,8 @@ export default function RepairsPage({ filter }: { filter?: string }) {
         )}
       </section>
       {creating && <RepairCreateModal statuses={statuses} repairs={repairs} initialCustomerId={creating.customerId} autoPrintKind={autoPrint} onClose={closeCreate} onCreated={created} />}
+      {deleting && <DeleteRepairDialog repair={deleting} onClose={() => setDeleting(null)}
+        onDeleted={() => { setRepairs((list) => list.filter((r) => r.id !== deleting.id)); setDeleting(null); }} />}
     </div>
   );
 }

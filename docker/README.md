@@ -72,16 +72,18 @@ The ready-to-paste configuration is `compose.truenas.yaml`. It uses port `31500`
 
 The images are published when a change is merged into `main`. GitHub makes new packages private. Make them public once: on GitHub open your profile → **Packages** → `dbrepairs-api` → **Package settings** → **Change visibility** → **Public**. Repeat for `dbrepairs-web`.
 
-Before installing the app, create two datasets under the `Apps` pool using the **Apps** dataset preset:
+Before installing the app, create three datasets under the `Apps` pool using the **Apps** dataset preset:
 
 - `Apps/dbrepairs-postgres` for the PostgreSQL database;
-- `Apps/dbrepairs-backups` for automatic dumps.
+- `Apps/dbrepairs-backups` for automatic dumps;
+- `Apps/dbrepairs-photos` for repair photos (grant full control to user ID `1000`).
 
 Their host paths must be:
 
 ```text
 /mnt/Apps/dbrepairs-postgres
 /mnt/Apps/dbrepairs-backups
+/mnt/Apps/dbrepairs-photos
 ```
 
 If PostgreSQL reports a permission error, edit the ACL for `dbrepairs-postgres` and grant full control to user ID `70`, the `postgres` user in the Alpine image.
@@ -144,6 +146,55 @@ docker compose start api backup web
 
 Restore as the restricted account (`-U dbrepairs_app`), never as the administrator, so the dump cannot run privileged commands. Change the arguments if `POSTGRES_DB` or `APP_DB_USER` were customized. Restoring overwrites server data; take a fresh backup first.
 
+## Repair photos
+
+Photos are files in their own Docker volume, `dbrepairs_repair_photos`, mounted at `/data/photos` in the `api` container. The database only records which file belongs to which repair. Keeping them apart means the database stays small and fast, and the photos can be backed up, moved or removed on their own.
+
+```text
+postgres_data    → customers, repairs, settings (the database)
+postgres_backups → automatic database dumps
+repair_photos    → photo files (JPEG/PNG/WebP), about 1 MB each
+```
+
+Phones resize photos to at most 2560 px before uploading, and each photo gets a small preview for the gallery.
+
+**What happens to photos**
+
+- Deleting a repair asks whether to delete its photos too or keep them as *archived* photos.
+- Saving a repair as Delivered or Cancelled asks whether to keep or delete its photos.
+- **Settings → Storage** (admins) shows how much space photos use and how much disk is free, deletes photos of closed repairs or archived photos older than a number of days, lists archived photos, and can turn on automatic cleanup (checked every 6 hours). **Check storage** finds photos whose file is missing and leftover files no repair uses.
+
+**Use a host folder instead of a volume.** Set `PHOTOS_PATH` in `.env` to a folder on the server, for example `PHOTOS_PATH=/srv/dbrepairs-photos`, and give it to the container user (uid 1000):
+
+```bash
+sudo mkdir -p /srv/dbrepairs-photos && sudo chown 1000:1000 /srv/dbrepairs-photos
+docker compose up -d
+```
+
+**Back up photos.** Database backups (`.dump` and `.dbrepairs`) do **not** include photos. Copy them into one file with:
+
+```bash
+docker run --rm -v dbrepairs_repair_photos:/photos -v "$PWD":/out alpine tar czf /out/dbrepairs-photos.tgz -C /photos .
+```
+
+Restore that file into the volume (stop the API first):
+
+```bash
+docker compose stop api
+docker run --rm -v dbrepairs_repair_photos:/photos -v "$PWD":/in alpine tar xzf /in/dbrepairs-photos.tgz -C /photos
+docker compose start api
+```
+
+**Remove all photos for good** (the database keeps working; run **Settings → Storage → Check storage → Clean these up** afterwards to remove the records):
+
+```bash
+docker compose rm -sf api          # removes only the api container, not its data
+docker volume rm dbrepairs_repair_photos
+docker compose up -d               # recreates the api with a new, empty photos volume
+```
+
+`docker compose stop` / `start` and `docker compose down` (without `--volumes`) never touch the photos.
+
 ## Operations
 
 View service state and logs:
@@ -159,7 +210,7 @@ Update after pulling a new release:
 docker compose up -d --build
 ```
 
-Database migrations run automatically and transactionally when the API starts. Persistent data remains in the `postgres_data` volume.
+Database migrations run automatically and transactionally when the API starts. Persistent data remains in the `postgres_data` volume, and photos in the `repair_photos` volume.
 
 To stop the application without deleting data:
 
@@ -167,7 +218,7 @@ To stop the application without deleting data:
 docker compose down
 ```
 
-Do not add `--volumes` unless the PostgreSQL data and backup volumes are intentionally being deleted.
+Do not add `--volumes` unless the PostgreSQL data, backup and photo volumes are intentionally being deleted.
 
 ## Development
 

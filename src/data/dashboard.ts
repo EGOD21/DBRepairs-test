@@ -32,5 +32,5 @@ export async function getDashboard(): Promise<DashboardData> {
     (SELECT COUNT(*) FROM repair_parts WHERE status='needed') partsToOrder`);
   const recent = await db.select<Repair[]>(`${desktopRepairSelect} ORDER BY r.id DESC LIMIT 8`);
   const stats = Object.fromEntries(Object.entries(counts ?? emptyStats).map(([key, value]) => [key, Number(value)])) as DashboardStats;
-  return { stats, recent: recent.map((r) => ({ ...r, paid: Boolean(r.paid), parts_pending: Number(r.parts_pending) })) };
+  return { stats, recent: recent.map((r) => ({ ...r, paid: Boolean(r.paid), parts_pending: Number(r.parts_pending), photo_count: Number(r.photo_count ?? 0) })) };
 }
