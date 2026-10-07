@@ -92,7 +92,13 @@ Live overview with:
 - Transactional HTTP API and automatic schema migrations.
 - Docker Compose stack for a server or Portainer.
 - Repair photos kept in their own Docker volume, with Settings → Storage to see usage, delete old photos or turn on automatic cleanup.
-- Manual and scheduled PostgreSQL backups with configurable retention.
+- **Billing:** time tracking with running timers, estimates the customer approves and signs on screen, invoices, partial payments, a printable invoice with an optional payment link, and CSV export for QuickBooks or Xero.
+- **Retainer clients:** contracts with included hours, monthly invoices made automatically, SLA response and resolution targets with warnings, and recurring maintenance visits that open repairs on schedule.
+- **Client records:** equipment (assets) with serial numbers and history, network notes, documents, an encrypted password vault, intake checklists with waivers and signatures, and data-wipe certificates.
+- **Shop floor:** parts inventory with low-stock alerts, supplier returns (RMAs), warranty comebacks linked to the original repair, an unclaimed-devices list, and a team schedule that can be added to phone calendars.
+- **Communication:** email and SMS sent from the server, automatic "received" and "ready" messages, an optional public status page for customers, and phone notifications for staff.
+- **Tools:** camera barcode scanning, checklists for repair procedures, a searchable knowledge base, reports with charts, and an activity log of who changed what.
+- Manual and scheduled PostgreSQL backups with configurable retention, plus an optional off-site copy with rclone.
 - Portable `.dbrepairs` backups for two-way transfer between SQLite and PostgreSQL.
 
 ## Technology
@@ -113,7 +119,7 @@ Live overview with:
 Download the `.deb` package and install it with:
 
 ```bash
-sudo apt install ./DBRepairs_0.6.0_amd64.deb
+sudo apt install ./DBRepairs_0.7.0_amd64.deb
 ```
 
 ### Fedora / RHEL compatible distributions
@@ -121,7 +127,7 @@ sudo apt install ./DBRepairs_0.6.0_amd64.deb
 Download the `.rpm` package and install it with your distribution package manager, for example:
 
 ```bash
-sudo dnf install ./DBRepairs-0.6.0-1.x86_64.rpm
+sudo dnf install ./DBRepairs-0.7.0-1.x86_64.rpm
 ```
 
 ## Development

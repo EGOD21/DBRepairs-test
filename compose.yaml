@@ -63,6 +63,18 @@ services:
       TZ: ${TZ:-Europe/Lisbon}
       TRUST_PROXY: "true"
       PHOTOS_DIR: /data/photos
+      # Turns on the encrypted password vault. Keep a copy somewhere safe:
+      # without the same key, saved passwords cannot be read.
+      VAULT_KEY: ${VAULT_KEY:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURITY: ${SMTP_SECURITY:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      TWILIO_FROM: ${TWILIO_FROM:-}
     volumes:
       # Repair photos, kept apart from the database so they can be backed up,
       # moved or removed on their own. Set PHOTOS_PATH to use a host folder.
@@ -124,6 +136,33 @@ services:
           sleep "$${BACKUP_INTERVAL_SECONDS}"
         done
     networks: [internal]
+
+  # Optional off-site copy of the database dumps and photos (Backblaze B2, S3, Google
+  # Drive, another server over SFTP…). Off unless started with the "offsite" profile:
+  #   docker compose run --rm --entrypoint rclone offsite config   (once, to add a remote)
+  #   docker compose --profile offsite up -d
+  offsite:
+    image: rclone/rclone:1.68
+    profiles: ["offsite"]
+    restart: unless-stopped
+    environment:
+      OFFSITE_REMOTE: ${OFFSITE_REMOTE:-}
+      OFFSITE_INTERVAL_SECONDS: ${OFFSITE_INTERVAL_SECONDS:-86400}
+      RCLONE_CONFIG: /config/rclone/rclone.conf
+    volumes:
+      - postgres_backups:/backups:ro
+      - ${PHOTOS_PATH:-repair_photos}:/photos:ro
+      - ./rclone:/config/rclone
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        if [ -z "$$OFFSITE_REMOTE" ]; then echo "Set OFFSITE_REMOTE (for example b2:my-bucket/dbrepairs) in .env"; exit 1; fi
+        while true; do
+          rclone sync /backups "$$OFFSITE_REMOTE/database" --log-level NOTICE || echo "Database copy failed"
+          rclone sync /photos "$$OFFSITE_REMOTE/photos" --log-level NOTICE || echo "Photo copy failed"
+          sleep "$$OFFSITE_INTERVAL_SECONDS"
+        done
 
 volumes:
   postgres_data:

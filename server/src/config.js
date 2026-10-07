@@ -1,4 +1,6 @@
 import { createSessionKey } from "./auth.js";
+import { smtpConfig } from "./smtp.js";
+import { twilioConfig } from "./messaging.js";
 
 function positiveInteger(value, fallback) {
   const parsed = Number(value);
@@ -39,7 +41,13 @@ export function loadConfig(env = process.env) {
     trustProxy: env.TRUST_PROXY === "true",
     // Repair photos are files in this folder (its own Docker volume), not in the database.
     photosDir: env.PHOTOS_DIR?.trim() || "/data/photos",
-    autoPrunePhotos: true,
+    // Photo cleanup, maintenance tickets and contract invoices run on a timer.
+    backgroundJobs: true,
+    // Encrypts the password vault. Without it the vault stays off.
+    vaultSecret: env.VAULT_KEY?.trim() || "",
+    // Optional email (SMTP_*) and text messages (TWILIO_*). Without them the app opens your own email app instead.
+    smtp: smtpConfig(env),
+    sms: twilioConfig(env),
     auth: { password, sessionKey: createSessionKey(password, env.SESSION_SECRET ?? "") },
   };
 }

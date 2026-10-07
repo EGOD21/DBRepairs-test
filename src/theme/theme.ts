@@ -115,6 +115,8 @@ export function applyTheme(theme: Theme) {
     if (isSafeThemeValue(value)) root.style.setProperty(cssName(field.key), value);
   }
   root.style.colorScheme = isDark(theme.background) ? "dark" : "light";
+  // Charts pick their dark-surface color steps from this.
+  root.dataset.scheme = isDark(theme.background) ? "dark" : "light";
 }
 
 export function isDark(color: string) {

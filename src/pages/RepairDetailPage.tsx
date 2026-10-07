@@ -4,11 +4,26 @@ import Menu from "../components/Menu";
 import { PriorityBadge, StatusBadge } from "../components/Badges";
 import PartsEditor from "../components/PartsEditor";
 import RepairPhotos from "../components/RepairPhotos";
+import TimeCard from "../components/TimeCard";
+import BillingCard from "../components/BillingCard";
+import ActivityCard from "../components/ActivityCard";
+import SlaBadge from "../components/SlaBadge";
+import IntakeCard from "../components/IntakeCard";
+import AppointmentModal from "../components/AppointmentModal";
+import { createComeback } from "../data/shopfloor";
+import WipesCard from "../components/WipesCard";
+import { checklistItems, defaultChecklist, RepairSignature } from "../data/records";
 import DeleteRepairDialog from "../components/DeleteRepairDialog";
 import Modal from "../components/Modal";
 import PhotoPrint from "../print/PhotoPrint";
 import { deleteRepairPhotos, listRepairPhotos, RepairPhoto } from "../data/photos";
 import { isServerMode } from "../data/runtime";
+import { draftFromMailto, useComposer } from "../composer";
+import { smsLink } from "../lib/email";
+import MessagesCard from "../components/MessagesCard";
+import ChecklistCard from "../components/ChecklistCard";
+import StatusLinkButton from "../components/StatusLinkButton";
+import { statusLink } from "../data/comms";
 import PrintCenter from "../print/PrintCenter";
 import { officeFromSettings, takeAutoPrint, toPrintData } from "../print/data";
 import { defaultLabelSize, TicketKind } from "../print/types";
@@ -39,10 +54,14 @@ export default function RepairDetailPage({ id }: { id: number }) {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ tone: "error" | "success"; text: string } | null>(null);
   const [printing, setPrinting] = useState<{ kind: TicketKind; auto: boolean } | null>(null);
+  const [trackUrl, setTrackUrl] = useState<string | null>(null);
   const [printingPhotos, setPrintingPhotos] = useState<RepairPhoto[] | null>(null);
   const [photoCount, setPhotoCount] = useState(0);
   const [deleting, setDeleting] = useState(false);
   const [galleryKey, setGalleryKey] = useState(0);
+  const [signatures, setSignatures] = useState<RepairSignature[]>([]);
+  const [scheduling, setScheduling] = useState(false);
+  const composer = useComposer();
   // Shown after a repair is saved as delivered or cancelled while it still has photos.
   const [closePrompt, setClosePrompt] = useState(false);
 
@@ -74,6 +93,12 @@ export default function RepairDetailPage({ id }: { id: number }) {
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
+
+  // The customer's "track your repair" address, printed on the receipt and intake sheet.
+  useEffect(() => {
+    if (!isServerMode || settings["status.enabled"] !== "1") { setTrackUrl(null); return; }
+    statusLink(id).then((result) => setTrackUrl(result.url)).catch(() => setTrackUrl(null));
+  }, [id, settings["status.enabled"]]);
 
   if (loading) return <div className="page"><div className="empty">{t("common.loading")}</div></div>;
   if (notFound || !repair || !form) {
@@ -125,6 +150,17 @@ export default function RepairDetailPage({ id }: { id: number }) {
     }
   }
 
+  async function comeback() {
+    const fault = window.prompt(t("comeback.prompt"), "");
+    if (fault === null) return;
+    try {
+      const created = await createComeback(id, fault);
+      navigate({ name: "repair", id: created.id });
+    } catch (cause) {
+      setMessage({ tone: "error", text: cause instanceof Error ? cause.message : t("common.saveError") });
+    }
+  }
+
   async function printAllPhotos() {
     try {
       setPrintingPhotos(await listRepairPhotos(id));
@@ -132,6 +168,19 @@ export default function RepairDetailPage({ id }: { id: number }) {
       setMessage({ tone: "error", text: t("photos.loadError") });
     }
   }
+
+  const intakeSignature = signatures.find((s) => s.kind === "intake");
+  const printData = {
+    ...toPrintData(repair),
+    ...(isServerMode ? {
+      checklist: checklistItems(settings["intake.checklist"] || defaultChecklist).map((label) => ({ label, checked: Boolean(repair.intake_checklist?.[label]) })),
+      dataBackup: repair.data_backup ? t(`intake.backup.${repair.data_backup}`) : undefined,
+      waiver: settings["intake.waiver"] || t("intake.defaultWaiver"),
+      equipment: repair.asset_name ?? undefined,
+      intakeSignature: intakeSignature ? { image: intakeSignature.image, name: intakeSignature.signer_name } : undefined,
+      trackUrl: trackUrl ?? undefined,
+    } : {}),
+  };
 
   const field = (key: keyof RepairUpdateInput, label: string, props: Record<string, unknown> = {}) => (
     <label className="field"><span>{label}</span><input value={String(form[key] ?? "")} onChange={(e) => set(key, e.target.value as never)} {...props} /></label>
@@ -151,6 +200,11 @@ export default function RepairDetailPage({ id }: { id: number }) {
             <PriorityBadge priority={repair.priority} quiet />
             {overdue && <span className="badge danger"><Icon name="alert" size={12} />{t("repair.overdue")}</span>}
             {repair.paid && <span className="badge success">{t("repair.paid")}</span>}
+            {repair.maintenance_plan_id && <span className="badge accent"><Icon name="clock" size={12} />{t("maintenance.badge")}</span>}
+            <SlaBadge repair={repair} />
+            {repair.parent_repair_id && <a className={`badge ${repair.is_warranty ? "warning" : ""}`} href={href({ name: "repair", id: repair.parent_repair_id })}>
+              <Icon name="back" size={12} />{repair.is_warranty ? t("comeback.warrantyOf") : t("comeback.of")} {repair.parent_repair_number}</a>}
+            {(repair.comeback_count ?? 0) > 0 && <span className="badge danger">{fill(t("comeback.count"), { count: repair.comeback_count ?? 0 })}</span>}
           </div>
           <p><a href={href({ name: "customer", id: repair.customer_id })}>{repair.customer_name}</a> · {t("repair.openedAt")} {formatDbDate(repair.opened_at)}</p>
         </div>
@@ -164,11 +218,18 @@ export default function RepairDetailPage({ id }: { id: number }) {
           {repair.customer_email ? (
             <Menu label={t("email.customer")} icon="mail">{(close) => (<>
               {repairEmailTemplates.map((template) => (
-                <a key={template} href={repairEmail(template, repair, settings, t)} onClick={close}><Icon name="mail" size={16} /><span>{t(`email.${template}.label`)}</span></a>
+                <a key={template} href={repairEmail(template, repair, settings, t)}
+                  onClick={(event) => { composer.intercept(draftFromMailto(repairEmail(template, repair, settings, t), { repair_id: repair.id, customer_id: repair.customer_id }))(event); close(); }}><Icon name="mail" size={16} /><span>{t(`email.${template}.label`)}</span></a>
               ))}
             </>)}</Menu>
           ) : <button type="button" className="btn" disabled title={t("email.noAddress")}><Icon name="mail" size={16} />{t("email.customer")}</button>}
+          {composer.status.sms && repair.customer_mobile && <a className="btn btn-icon" href={smsLink(repair.customer_mobile)} title={t("customer.text")} aria-label={t("customer.text")}
+            onClick={composer.intercept({ channel: "sms", to: repair.customer_mobile, body: "", repair_id: repair.id, customer_id: repair.customer_id })}><Icon name="message" size={16} /></a>}
           {phone && <a className="btn btn-icon" href={telLink(phone)} title={`${t("customer.call")} ${phone}`} aria-label={t("customer.call")}><Icon name="phone" size={16} /></a>}
+          {isServerMode && <Menu label={t("common.more")} variant="btn">{(close) => (<>
+            <button type="button" onClick={() => { close(); setScheduling(true); }}><Icon name="calendar" size={16} /><span>{t("schedule.add")}<small>{t("schedule.fromRepairHint")}</small></span></button>
+            {isClosed(repair) && <button type="button" onClick={() => { close(); void comeback(); }}><Icon name="back" size={16} /><span>{t("comeback.create")}<small>{t("comeback.createHint")}</small></span></button>}
+          </>)}</Menu>}
           <button type="button" className="btn btn-danger" onClick={() => setDeleting(true)}><Icon name="trash" size={16} />{t("common.delete")}</button>
           <button type="button" className="btn btn-primary" onClick={() => void save()} disabled={!dirty || saving || !form.reported_fault.trim()}>{saving ? t("common.saving") : t("common.saveChanges")}</button>
         </div>
@@ -199,6 +260,11 @@ export default function RepairDetailPage({ id }: { id: number }) {
               {area("internal_notes", t("repair.internalNotes"), 2)}
             </div>
           </section>
+          {isServerMode && <ChecklistCard repair={repair} />}
+          {isServerMode && <IntakeCard repair={repair} settings={settings} onChanged={() => void load()} onSignatures={setSignatures} />}
+          {isServerMode && <TimeCard repairId={repair.id} customerId={repair.customer_id} />}
+          {isServerMode && <BillingCard repairId={repair.id} customerId={repair.customer_id} />}
+          {isServerMode && <WipesCard customerId={repair.customer_id} repairId={repair.id} />}
           {isServerMode && <RepairPhotos key={galleryKey} repairId={repair.id} onCountChange={setPhotoCount} onPrint={setPrintingPhotos} />}
           <PartsEditor repairId={repair.id} onChange={() => { void getRepair(id).then((r) => r && setRepair((current) => current ? { ...current, parts_pending: r.parts_pending } : r)); }} />
         </div>
@@ -242,16 +308,21 @@ export default function RepairDetailPage({ id }: { id: number }) {
               {repair.due_date && <p className="muted" style={{ marginTop: 14, fontSize: 12 }}>{t("repair.dueDate")}: {formatPlainDate(repair.due_date)}{isClosed(repair) ? "" : overdue ? ` · ${t("repair.overdue")}` : ""}</p>}
             </div>
           </section>
+          {isServerMode && <StatusLinkButton repair={repair} />}
+          {isServerMode && <MessagesCard repairId={repair.id} />}
+          {isServerMode && <ActivityCard key={repair.updated_at ?? ""} repairId={repair.id} />}
         </div>
       </div>
 
       {printing && (
-        <PrintCenter data={toPrintData(repair)} office={officeFromSettings(settings)} initialKind={printing.kind}
+        <PrintCenter data={printData} office={officeFromSettings(settings)} initialKind={printing.kind}
           labelSize={settings["print.labelSize"] || defaultLabelSize} autoPrint={printing.auto} onClose={() => setPrinting(null)} />
       )}
       {printingPhotos && printingPhotos.length > 0 && (
-        <PhotoPrint photos={printingPhotos} data={toPrintData(repair)} office={officeFromSettings(settings)} onClose={() => setPrintingPhotos(null)} />
+        <PhotoPrint photos={printingPhotos} data={printData} office={officeFromSettings(settings)} onClose={() => setPrintingPhotos(null)} />
       )}
+      {scheduling && <AppointmentModal appointment={null} initial={{ title: `${repair.repair_number} — ${repair.customer_name}`, customer_id: repair.customer_id, repair_id: repair.id }}
+        onClose={() => setScheduling(false)} onSaved={() => setScheduling(false)} />}
       {deleting && <DeleteRepairDialog repair={{ ...repair, photo_count: photoCount }} onClose={() => setDeleting(false)} onDeleted={() => navigate({ name: "repairs" })} />}
       {closePrompt && (
         <Modal title={t("photos.closedTitle")} subtitle={fill(t("photos.closedText"), { count: String(photoCount) })} onClose={() => setClosePrompt(false)}

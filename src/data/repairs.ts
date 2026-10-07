@@ -17,6 +17,18 @@ export type Repair = {
   parts_pending: number;
   /** Server edition only; always 0 on the desktop app. */
   photo_count: number;
+  updated_at?: string;
+  sla_due_at?: string | null;
+  first_response_at?: string | null;
+  maintenance_plan_id?: number | null;
+  asset_id?: number | null;
+  asset_name?: string | null;
+  intake_checklist?: Record<string, boolean> | null;
+  data_backup?: "requested" | "declined" | "not_needed" | null;
+  parent_repair_id?: number | null;
+  parent_repair_number?: string | null;
+  is_warranty?: boolean;
+  comeback_count?: number;
 };
 
 export type RepairInput = {

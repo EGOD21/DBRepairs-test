@@ -8,3 +8,6 @@ src-tauri/target/
 .env
 
 src-tauri/gen/
+
+# Off-site backup credentials
+rclone/rclone.conf

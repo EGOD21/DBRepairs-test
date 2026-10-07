@@ -207,12 +207,17 @@ export async function exportPortableBackup(pool) {
   }
 }
 
+// Children before parents. The audit log and document numbers are kept.
+export const SERVER_ONLY_TABLES = ["outbox", "repair_checklists", "appointments", "supplier_returns", "running_timers", "time_entries", "payments", "invoice_lines", "signatures", "invoices", "maintenance_plans", "contracts", "data_wipes", "credentials", "customer_files", "network_items", "customer_networks", "assets"];
+
 export async function importPortableBackup(pool, value) {
   const archive = validatePortableBackup(value);
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
     await client.query("SELECT pg_advisory_xact_lock(87234022)");
+    // Server-only records hang off customers and repairs, so they go too (a native backup is taken first).
+    await client.query(SERVER_ONLY_TABLES.map((table) => `DELETE FROM ${table}`).join("; "));
     await client.query("DELETE FROM repair_parts; DELETE FROM repair_status_history; DELETE FROM repairs; DELETE FROM customers; DELETE FROM repair_statuses; DELETE FROM app_settings");
     const tables = [["app_settings", archive.data.settings], ["repair_statuses", archive.data.statuses], ["customers", archive.data.customers],
       ["repairs", archive.data.repairs], ["repair_status_history", archive.data.history], ["repair_parts", archive.data.parts]];

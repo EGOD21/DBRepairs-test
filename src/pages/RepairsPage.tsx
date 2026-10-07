@@ -1,5 +1,7 @@
 import { KeyboardEvent, useEffect, useMemo, useState } from "react";
 import Icon from "../components/Icon";
+import ScanButton from "../components/ScanButton";
+import { isServerMode } from "../data/runtime";
 import { PriorityBadge, StatusBadge } from "../components/Badges";
 import RepairCreateModal from "../components/RepairCreateModal";
 import DeleteRepairDialog from "../components/DeleteRepairDialog";
@@ -84,6 +86,13 @@ export default function RepairsPage({ filter }: { filter?: string }) {
     if (target) navigate({ name: "repair", id: target.id });
   }
 
+  // The camera reads a repair label: jump straight to it, otherwise search for the text.
+  function openScanned(text: string) {
+    const exact = repairs.find((r) => r.repair_number.toLowerCase() === text.toLowerCase());
+    if (exact) navigate({ name: "repair", id: exact.id });
+    else setSearch(text);
+  }
+
   function created(id: number, print: boolean) {
     if (print) {
       const kind: TicketKind = autoPrint === "label" || autoPrint === "receipt" ? autoPrint : "intake";
@@ -110,6 +119,7 @@ export default function RepairsPage({ filter }: { filter?: string }) {
           <div className="search">
             <Icon name="search" size={16} />
             <input className="input" value={search} onChange={(e) => setSearch(e.target.value)} onKeyDown={onSearchKey} placeholder={t("repairs.search")} aria-label={t("repairs.search")} />
+            {isServerMode && <ScanButton onResult={openScanned} />}
           </div>
           <div className="segmented" role="group">
             {(["all", "open", "overdue", "closed"] as Scope[]).map((s) => <button key={s} type="button" className={scope === s ? "active" : ""} onClick={() => setScope(s)}>{t(`repairs.scope.${s}`)}</button>)}

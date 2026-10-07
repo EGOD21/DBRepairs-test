@@ -2,6 +2,7 @@ import { FormEvent, useState } from "react";
 import Modal from "./Modal";
 import { useI18n } from "../i18n/I18nProvider";
 import { createCustomer, CustomerInput, emptyCustomerInput, updateCustomer } from "../data/customers";
+import { isServerMode } from "../data/runtime";
 
 type Props = { customerId?: number; initial?: CustomerInput; onClose: () => void; onSaved: (id: number) => void };
 
@@ -62,6 +63,8 @@ export default function CustomerFormModal({ customerId, initial, onClose, onSave
             </label>
             <label className="field full"><span>{t("customer.address")}</span><textarea rows={2} value={form.address} onChange={(e) => set("address", e.target.value)} /></label>
 
+            {/* On the server, retainers are contracts on the customer's page and fill these in. */}
+            {!isServerMode && <>
             <div className="form-section-title">{t("customer.section.retainer")}</div>
             <label className="check full"><input type="checkbox" checked={form.isRetainer} onChange={(e) => set("isRetainer", e.target.checked)} />{t("customer.isRetainer")}</label>
             {form.isRetainer && (<>
@@ -69,6 +72,7 @@ export default function CustomerFormModal({ customerId, initial, onClose, onSave
               {text("retainerMonthlyFee", t("customer.retainerMonthlyFee"), { type: "number", step: "0.01", min: "0" })}
               {text("retainerRenewalDate", t("customer.retainerRenewalDate"), { type: "date" })}
             </>)}
+            </>}
 
             <div className="form-section-title">{t("customer.section.other")}</div>
             <label className="field full"><span>{t("customer.tags")}</span><input value={form.tags} onChange={(e) => set("tags", e.target.value)} placeholder={t("customer.tagsPlaceholder")} /></label>

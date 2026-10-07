@@ -64,7 +64,7 @@ services:
   api:
     # Built from your fork by .github/workflows/docker-publish.yml.
     # To update, change the version number on both image lines.
-    image: ghcr.io/egod21/dbrepairs-api:0.6.0
+    image: ghcr.io/egod21/dbrepairs-api:0.7.0
     restart: unless-stopped
     environment:
       PGHOST: db
@@ -77,6 +77,17 @@ services:
       TZ: Europe/Lisbon
       TRUST_PROXY: "true"
       PHOTOS_DIR: /data/photos
+      # Optional: a long random value turns on the encrypted password vault. Never change it afterwards.
+      VAULT_KEY: ""
+      # Optional email and text messages. See "Optional features" in docker/README.md.
+      SMTP_HOST: ""
+      SMTP_PORT: 587
+      SMTP_USER: ""
+      SMTP_PASSWORD: ""
+      SMTP_FROM: ""
+      TWILIO_ACCOUNT_SID: ""
+      TWILIO_AUTH_TOKEN: ""
+      TWILIO_FROM: ""
     volumes:
       - /mnt/Apps/dbrepairs-photos:/data/photos
     depends_on:
@@ -91,7 +102,7 @@ services:
     networks: [internal]
 
   web:
-    image: ghcr.io/egod21/dbrepairs-web:0.6.0
+    image: ghcr.io/egod21/dbrepairs-web:0.7.0
     restart: unless-stopped
     ports:
       - "31500:8080"

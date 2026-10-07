@@ -3,6 +3,9 @@ import Icon from "./Icon";
 import { blankPartInput, createPart, deletePart, listRepairParts, Part, PartInput, partStatuses, safeLink, toPartInput, updatePart } from "../data/parts";
 import { formatMoney } from "../lib/format";
 import { useI18n } from "../i18n/I18nProvider";
+import { isServerMode } from "../data/runtime";
+import UseStockModal from "./UseStockModal";
+import { ReturnModal } from "./ReturnsTab";
 
 /** Parts a repair needs: what to order, where, the link, and how far along it is. */
 export default function PartsEditor({ repairId, onChange }: { repairId: number; onChange?: (parts: Part[]) => void }) {
@@ -12,6 +15,8 @@ export default function PartsEditor({ repairId, onChange }: { repairId: number; 
   const [form, setForm] = useState<PartInput>(blankPartInput);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [usingStock, setUsingStock] = useState(false);
+  const [returning, setReturning] = useState<Part | null>(null);
 
   async function load() {
     try {
@@ -65,7 +70,10 @@ export default function PartsEditor({ repairId, onChange }: { repairId: number; 
     <section className="card">
       <div className="card-header">
         <div><h2>{t("parts.title")}</h2><p>{t("parts.hint")}</p></div>
-        {editing === null && <button type="button" className="btn btn-sm" onClick={startNew}><Icon name="plus" size={15} />{t("part.add")}</button>}
+        {editing === null && <div className="card-actions">
+          {isServerMode && <button type="button" className="btn btn-sm" onClick={() => setUsingStock(true)}><Icon name="package" size={15} />{t("stock.fromStock")}</button>}
+          <button type="button" className="btn btn-sm" onClick={startNew}><Icon name="plus" size={15} />{t("part.add")}</button>
+        </div>}
       </div>
       {error && <div className="card-body"><div className="alert error">{error}</div></div>}
       {parts.length === 0 && editing === null ? <div className="empty">{t("parts.emptyRepair")}</div> : parts.length > 0 && (
@@ -86,6 +94,7 @@ export default function PartsEditor({ repairId, onChange }: { repairId: number; 
                 </td>
                 <td className="actions"><div className="row-actions">
                   <button type="button" className="btn btn-sm btn-icon btn-ghost" title={t("common.edit")} aria-label={t("common.edit")} onClick={() => startEdit(part)}><Icon name="pencil" size={14} /></button>
+                  {isServerMode && <button type="button" className="btn btn-sm btn-icon btn-ghost" title={t("return.add")} aria-label={t("return.add")} onClick={() => setReturning(part)}><Icon name="back" size={14} /></button>}
                   <button type="button" className="btn btn-sm btn-icon btn-ghost" title={t("common.delete")} aria-label={t("common.delete")} onClick={() => void remove(part)}><Icon name="trash" size={14} /></button>
                 </div></td>
               </tr>
@@ -112,6 +121,9 @@ export default function PartsEditor({ repairId, onChange }: { repairId: number; 
           </div>
         </form>
       )}
+      {usingStock && <UseStockModal repairId={repairId} onClose={() => setUsingStock(false)} onSaved={() => { setUsingStock(false); void load(); }} />}
+      {returning && <ReturnModal value={null} initial={{ item: returning.name, part_number: returning.part_number, supplier: returning.supplier ?? "", quantity: returning.quantity,
+        repair_id: repairId, repair_part_id: returning.id }} onClose={() => setReturning(null)} onSaved={() => setReturning(null)} />}
     </section>
   );
 }

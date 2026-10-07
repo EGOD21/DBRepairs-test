@@ -5,14 +5,14 @@ export const CONTACT_METHODS = ["email", "phone", "sms"];
 export const PRIORITIES = ["low", "normal", "high", "urgent"];
 export const PART_STATUSES = ["needed", "ordered", "received", "installed", "cancelled"];
 
-function object(value) {
+export function object(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new ValidationError("Expected a JSON object");
   }
   return value;
 }
 
-function text(value, field, { required = false, max = 10000 } = {}) {
+export function text(value, field, { required = false, max = 10000 } = {}) {
   if (value == null) value = "";
   if (typeof value !== "string") throw new ValidationError(`${field} must be text`);
   const trimmed = value.trim();
@@ -21,33 +21,33 @@ function text(value, field, { required = false, max = 10000 } = {}) {
   return trimmed || null;
 }
 
-function id(value, field) {
+export function id(value, field) {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 1) throw new ValidationError(`${field} must be a positive integer`);
   return parsed;
 }
 
-function money(value, field) {
+export function money(value, field) {
   if (value === "" || value == null) return null;
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) throw new ValidationError(`${field} must be a positive number`);
   return parsed;
 }
 
-function wholeNumber(value, field, { min = 0, max = 100000 } = {}) {
+export function wholeNumber(value, field, { min = 0, max = 100000 } = {}) {
   if (value === "" || value == null) return null;
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < min || parsed > max) throw new ValidationError(`${field} must be a whole number`);
   return parsed;
 }
 
-function choice(value, field, options, fallback) {
+export function choice(value, field, options, fallback) {
   if (value === "" || value == null) return fallback;
   if (!options.includes(value)) throw new ValidationError(`${field} must be one of ${options.join(", ")}`);
   return value;
 }
 
-function date(value, field) {
+export function date(value, field) {
   if (value === "" || value == null) return null;
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(value))) {
     throw new ValidationError(`${field} must be a date (YYYY-MM-DD)`);
@@ -55,7 +55,7 @@ function date(value, field) {
   return value;
 }
 
-function flag(value) {
+export function flag(value) {
   return value === true || value === 1 || value === "true";
 }
 
@@ -114,6 +114,11 @@ export function repairInput(value, update = false) {
     paid: flag(body.paid),
     warranty_days: wholeNumber(body.warranty_days, "warranty_days", { max: 3650 }),
   };
+  // Server-edition intake fields. Only sent by the web app, so older clients leave them alone.
+  result.extras = {};
+  if ("asset_id" in body) result.extras.asset_id = body.asset_id ? id(body.asset_id, "asset_id") : null;
+  if ("data_backup" in body) result.extras.data_backup = choice(body.data_backup || null, "data_backup", ["requested", "declined", "not_needed"], null);
+  if ("intake_checklist" in body) result.extras.intake_checklist = checklistInput(body.intake_checklist);
   if (update) {
     result.diagnosis = text(body.diagnosis, "diagnosis");
     result.work_performed = text(body.work_performed, "work_performed");
@@ -121,6 +126,15 @@ export function repairInput(value, update = false) {
     result.statusNote = text(body.statusNote, "statusNote");
   }
   return result;
+}
+
+// { "Charger": true, "Bag": false } — ticked items from the intake checklist.
+function checklistInput(value) {
+  if (value == null || value === "") return null;
+  if (typeof value !== "object" || Array.isArray(value)) throw new ValidationError("intake_checklist must be an object");
+  const entries = Object.entries(value);
+  if (entries.length > 50) throw new ValidationError("intake_checklist has too many items");
+  return Object.fromEntries(entries.map(([key, checked]) => [String(key).slice(0, 200), flag(checked)]));
 }
 
 export function partInput(value) {
@@ -158,7 +172,43 @@ export const SETTING_LIMITS = {
   "email.signature": 2000,
   // Deletes photos of closed repairs, and archived photos, after this many days (0 = never).
   "photos.autoDeleteDays": 10,
+  // Billing (see billing.js).
+  "billing.currency": 3,
+  "billing.taxRate": 10,
+  "billing.taxLabel": 40,
+  "billing.hourlyRate": 20,
+  "billing.timeRounding": 3,
+  "billing.invoicePrefix": 20,
+  "billing.estimatePrefix": 20,
+  "billing.paymentTermsDays": 5,
+  "billing.estimateValidDays": 5,
+  "billing.invoiceNotes": 2000,
+  "billing.paymentInstructions": 2000,
+  "billing.paymentLink": 1000,
+  // Client records (see records.js).
+  "vault.techAccess": 1,
+  "intake.checklist": 2000,
+  "intake.waiver": 4000,
+  "wipe.prefix": 20,
+  "wipe.statement": 2000,
+  // Shop floor (see shopfloor.js).
+  "unclaimed.days": 5,
+  "unclaimed.policy": 2000,
+  // Customer messages and the public status page (see messaging.js).
+  "notify.received": 1,
+  "notify.receivedSubject": 300,
+  "notify.receivedBody": 4000,
+  "notify.receivedSms": 600,
+  "notify.ready": 1,
+  "notify.readySubject": 300,
+  "notify.readyBody": 4000,
+  "notify.readySms": 600,
+  "status.enabled": 1,
+  "status.publicUrl": 300,
+  "status.language": 10,
 };
+
+const NUMBER_SETTINGS = ["billing.taxRate", "billing.hourlyRate", "billing.timeRounding", "billing.paymentTermsDays", "billing.estimateValidDays", "photos.autoDeleteDays", "unclaimed.days"];
 
 // Theme values become CSS custom properties, so allow only plain colors,
 // lengths and font names: no url(), no semicolons, no braces.
@@ -186,7 +236,12 @@ export function settingsInput(value) {
       throw new ValidationError("App icons must be PNG images");
     }
     if (key === "ui.theme" && cleaned) validateTheme(cleaned);
+    if (NUMBER_SETTINGS.includes(key) && cleaned && !/^\d{1,6}(\.\d{1,3})?$/.test(cleaned)) throw new ValidationError(`${key} must be a number`);
     if (key === "photos.autoDeleteDays" && cleaned && !/^\d{1,5}$/.test(cleaned)) throw new ValidationError("photos.autoDeleteDays must be a whole number of days");
+    if (key === "billing.currency" && cleaned && !/^[A-Z]{3}$/.test(cleaned)) throw new ValidationError("billing.currency must be a 3-letter code such as USD");
+    if (key === "status.publicUrl" && cleaned && !/^https:\/\/[^\s/]+(:\d+)?\/?$/.test(cleaned)) throw new ValidationError("status.publicUrl must be an https:// address without a path, for example https://shop.tail1234.ts.net:8443");
+    if (key === "status.language" && cleaned && !["en", "pt-PT", "es", "fr"].includes(cleaned)) throw new ValidationError("status.language is not supported");
+    if (key === "billing.paymentLink" && cleaned) webUrl(cleaned.replace(/\{(amount|number)\}/g, "0"), key);
     result[key] = cleaned;
   }
   return result;

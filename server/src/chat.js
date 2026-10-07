@@ -36,7 +36,7 @@ function contentDisposition(kind, filename) {
   return `${kind}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
 }
 
-export function registerChatRoutes(app, pool, requireAdmin) {
+export function registerChatRoutes(app, pool, requireAdmin, hooks = {}) {
   app.get("/api/chat/messages", async (request) => {
     const after = Number(request.query?.after);
     if (Number.isSafeInteger(after) && after > 0) {
@@ -100,6 +100,7 @@ export function registerChatRoutes(app, pool, requireAdmin) {
       }
       await client.query("COMMIT");
       const message = await pool.query(`${messageSelect} WHERE m.id=$1`, [id]);
+      hooks.onMessage?.(message.rows[0], request.user);
       return reply.code(201).send(message.rows[0]);
     } catch (error) {
       await client.query("ROLLBACK");

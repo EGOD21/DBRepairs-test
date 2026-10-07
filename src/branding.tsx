@@ -1,6 +1,7 @@
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { Branding, getBranding } from "./data/settings";
 import { applyTheme, parseTheme, Theme } from "./theme/theme";
+import { setCurrency } from "./lib/format";
 
 type BrandingValue = {
   companyName: string;
@@ -25,12 +26,14 @@ function setFavicon(url: string) {
 }
 
 export function BrandingProvider({ children }: { children: ReactNode }) {
-  const [branding, setBranding] = useState<Branding>({ "office.companyName": "", "office.logoDataUrl": "", "ui.theme": "" });
+  const [branding, setBranding] = useState<Branding>({ "office.companyName": "", "office.logoDataUrl": "", "ui.theme": "", "billing.currency": "" });
   const [preview, setPreview] = useState<Theme | null>(null);
 
   const refresh = useCallback(async () => {
     try {
-      setBranding(await getBranding());
+      const next = await getBranding();
+      setCurrency(next["billing.currency"]);
+      setBranding(next);
     } catch (error) {
       console.error("Could not load branding:", error);
     }

@@ -123,11 +123,13 @@ jobs:
         run: |
           docker network create ci
           docker run -d --name api --network ci python:3-alpine sh -c \
-            'mkdir -p /srv/api/app && printf from-api > /srv/api/app/icon-192.png && cd /srv && python -m http.server 3000'
+            'mkdir -p /srv/api/app /srv/status && printf from-api > /srv/api/app/icon-192.png && printf status-page > /srv/status/abc && cd /srv && python -m http.server 3000'
           docker run -d --name web --network ci -p 8080:8080 dbrepairs-web:ci
           for i in $(seq 1 30); do curl -sf http://127.0.0.1:8080/health >/dev/null && break; sleep 1; done
           # App icons live under /api/ and end in .png; they must reach the API, not the static-file rule.
           test "$(curl -s http://127.0.0.1:8080/api/app/icon-192.png)" = "from-api"
+          # Customer status pages are answered by the API too.
+          test "$(curl -s http://127.0.0.1:8080/status/abc)" = "status-page"
           # Bundled files are still served by nginx itself.
           curl -sf -o /dev/null http://127.0.0.1:8080/icons/icon-192.png
           # The service worker must never be cached, or installed apps miss updates.

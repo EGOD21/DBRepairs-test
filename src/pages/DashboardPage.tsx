@@ -4,7 +4,15 @@ import { PriorityBadge, StatusBadge } from "../components/Badges";
 import { DashboardData, emptyStats, getDashboard } from "../data/dashboard";
 import { isOverdue } from "../data/repairs";
 import { formatDbDate } from "../data/dates";
-import { deviceLabel, formatPlainDate } from "../lib/format";
+import { deviceLabel, formatClock, formatMinutes, formatMoney, formatPlainDate } from "../lib/format";
+import { listTimers, RunningTimer } from "../data/billing";
+import { Contract, listContracts, listSla, SlaRepair } from "../data/contracts";
+import { UsageMeter } from "../components/ContractsCard";
+import { listUnclaimed, markReminded, UnclaimedRepair } from "../data/shopfloor";
+import { mailtoLink, smsLink } from "../lib/email";
+import { draftFromMailto, useComposer } from "../composer";
+import { fill } from "../lib/format";
+import { useSession } from "../session";
 import { useI18n } from "../i18n/I18nProvider";
 import { href, navigate, Route } from "../router";
 
@@ -13,6 +21,12 @@ export default function DashboardPage() {
   const [data, setData] = useState<DashboardData>({ stats: emptyStats, recent: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const { teamFeatures } = useSession();
+  const [timers, setTimers] = useState<RunningTimer[]>([]);
+  const [sla, setSla] = useState<SlaRepair[]>([]);
+  const [contracts, setContracts] = useState<Contract[]>([]);
+  const [unclaimed, setUnclaimed] = useState<UnclaimedRepair[]>([]);
+  const composer = useComposer();
 
   useEffect(() => {
     let active = true;
@@ -20,8 +34,19 @@ export default function DashboardPage() {
       .then((result) => { if (active) setData(result); })
       .catch((cause) => { console.error(cause); if (active) setError(true); })
       .finally(() => { if (active) setLoading(false); });
+    if (teamFeatures) {
+      listTimers().then((list) => { if (active) setTimers(list); }).catch(() => {});
+      listSla().then((list) => { if (active) setSla(list); }).catch(() => {});
+      listContracts({ active: true }).then((list) => { if (active) setContracts(list); }).catch(() => {});
+      listUnclaimed().then((list) => { if (active) setUnclaimed(list); }).catch(() => {});
+    }
     return () => { active = false; };
   }, []);
+
+  // Contracts renewing within 30 days, or at 80% or more of this month's hours.
+  const soon = new Date(Date.now() + 30 * 86400_000).toISOString().slice(0, 10);
+  const renewsSoon = (c: Contract) => Boolean(c.renewal_date && c.renewal_date <= soon);
+  const attention = contracts.filter((c) => renewsSoon(c) || (c.hours_included > 0 && c.minutes_this_month / 60 >= c.hours_included * 0.8));
 
   const cards: { label: string; value: number; icon: IconName; to: Route; tone?: string }[] = [
     { label: t("dashboard.openRepairs"), value: data.stats.openRepairs, icon: "wrench", to: { name: "repairs", filter: "open" } },
@@ -29,6 +54,10 @@ export default function DashboardPage() {
     { label: t("dashboard.waitingCustomer"), value: data.stats.waitingCustomer, icon: "clock", to: { name: "repairs", filter: "WAITING_CUSTOMER" } },
     { label: t("dashboard.overdue"), value: data.stats.overdue, icon: "alert", to: { name: "repairs", filter: "overdue" }, tone: data.stats.overdue ? "danger" : "" },
     { label: t("dashboard.partsToOrder"), value: data.stats.partsToOrder, icon: "package", to: { name: "parts" }, tone: data.stats.partsToOrder ? "warning" : "" },
+    ...(teamFeatures ? [
+      { label: t("stock.lowTile"), value: data.stats.lowStock ?? 0, icon: "package" as IconName, to: { name: "parts" } as Route, tone: data.stats.lowStock ? "warning" : "" },
+      { label: t("return.openTile"), value: data.stats.openReturns ?? 0, icon: "back" as IconName, to: { name: "parts" } as Route },
+    ] : []),
     { label: t("dashboard.closedToday"), value: data.stats.closedToday, icon: "check", to: { name: "repairs", filter: "closed" } },
   ];
 
@@ -47,6 +76,71 @@ export default function DashboardPage() {
           </a>
         ))}
       </section>
+      {data.billing && (
+        <section className="stat-grid">
+          <a className="stat" href={href({ name: "billing" })}><span><Icon name="receipt" size={15} />{t("billing.outstanding")}</span><strong>{formatMoney(data.billing.outstanding)}</strong></a>
+          <a className={`stat${data.billing.overdue_invoices ? " danger" : ""}`} href={href({ name: "billing" })}><span><Icon name="alert" size={15} />{t("billing.overdue")}</span><strong>{formatMoney(data.billing.overdue_amount)}</strong></a>
+          <a className={`stat${data.billing.unbilled_minutes ? " warning" : ""}`} href={href({ name: "billing", tab: "time" })}><span><Icon name="clock" size={15} />{t("billing.unbilledTime")}</span><strong>{formatMinutes(data.billing.unbilled_minutes)}</strong></a>
+          <a className="stat" href={href({ name: "billing", tab: "payments" })}><span><Icon name="dollar" size={15} />{t("billing.paidThisMonth")}</span><strong>{formatMoney(data.billing.paid_this_month)}</strong></a>
+        </section>
+      )}
+      {sla.length > 0 && (
+        <section className="card">
+          <div className="card-header"><div><h2>{t("sla.waitingTitle")}</h2><p>{t("sla.waitingHint")}</p></div></div>
+          <div className="card-body sla-list">{sla.map((item) => (
+            <a key={item.id} className="sla-item" href={href({ name: "repair", id: item.id })}>
+              <span className={`badge ${item.seconds_left < 0 ? "danger" : item.seconds_left < 7200 ? "warning" : "accent"}`}><Icon name="clock" size={12} />
+                {item.seconds_left < 0 ? fill(t("sla.late"), { time: `${Math.round(-item.seconds_left / 3600 * 10) / 10} h` }) : fill(t("sla.left"), { time: `${Math.round(item.seconds_left / 3600 * 10) / 10} h` })}</span>
+              <strong>{item.repair_number}</strong><span>{item.customer_name}</span><span className="muted">{deviceLabel(item)}</span>
+            </a>
+          ))}</div>
+        </section>
+      )}
+      {unclaimed.length > 0 && (
+        <section className="card">
+          <div className="card-header"><div><h2>{t("unclaimed.title")}</h2><p>{t("unclaimed.hint")}</p></div></div>
+          <div className="table-wrap"><table className="responsive compact">
+            <tbody>{unclaimed.map((item) => (
+              <tr key={item.id}>
+                <td className="cell-title"><strong><a href={href({ name: "repair", id: item.id })}>{item.repair_number}</a></strong> <span className="muted">{item.customer_name}</span></td>
+                <td data-label={t("unclaimed.waiting")}><span className={`badge ${item.days_waiting > 60 ? "danger" : "warning"}`}>{fill(t("unclaimed.days"), { days: item.days_waiting })}</span></td>
+                <td data-label={t("unclaimed.reminded")} className="muted">{item.pickup_reminded_at ? formatDbDate(item.pickup_reminded_at) : t("unclaimed.never")}</td>
+                <td className="actions"><div className="page-actions">
+                  {item.customer_email && <a className="btn btn-sm" href={mailtoLink(item.customer_email, fill(t("unclaimed.emailSubject"), { number: item.repair_number }), fill(t("unclaimed.emailBody"), { name: item.customer_name.split(/\s+/)[0], number: item.repair_number, days: item.days_waiting, device: deviceLabel(item) }))}
+                    onClick={(event) => {
+                      composer.intercept(draftFromMailto(event.currentTarget.getAttribute("href") ?? "", { repair_id: item.id, customer_id: item.customer_id }))(event);
+                      void markReminded(item.id).then(() => setUnclaimed((list) => list.map((u) => u.id === item.id ? { ...u, pickup_reminded_at: new Date().toISOString() } : u)));
+                    }}><Icon name="mail" size={14} />{t("unclaimed.remind")}</a>}
+                  {item.customer_phone && <a className="btn btn-sm btn-icon" href={smsLink(item.customer_phone)} aria-label={t("customer.text")}
+                    onClick={(event) => { composer.intercept({ channel: "sms", to: item.customer_phone!, body: fill(t("unclaimed.sms"), { number: item.repair_number, days: item.days_waiting }), repair_id: item.id, customer_id: item.customer_id })(event); void markReminded(item.id); }}><Icon name="message" size={14} /></a>}
+                </div></td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        </section>
+      )}
+      {attention.length > 0 && (
+        <section className="card">
+          <div className="card-header"><div><h2>{t("contract.attentionTitle")}</h2><p>{t("contract.attentionHint")}</p></div></div>
+          <div className="contract-list">{attention.map((contract) => (
+            <a key={contract.id} className="contract-item" href={href({ name: "customer", id: contract.customer_id })} style={{ color: "inherit", textDecoration: "none" }}>
+              <div className="contract-head"><strong>{contract.customer_name}</strong><span className="muted">{contract.name}</span>
+                {renewsSoon(contract) && <span className="badge warning">{t("contract.renews")} {formatPlainDate(contract.renewal_date)}</span>}</div>
+              <UsageMeter minutes={contract.minutes_this_month} hoursIncluded={contract.hours_included} />
+            </a>
+          ))}</div>
+        </section>
+      )}
+      {timers.length > 0 && (
+        <section className="card">
+          <div className="card-header"><h2>{t("time.workingNow")}</h2></div>
+          <div className="card-body working-now">{timers.map((timer) => (
+            <a key={timer.user_id} className="working-item" href={timer.repair_id ? href({ name: "repair", id: timer.repair_id }) : href({ name: "customer", id: timer.customer_id })}>
+              <span className="timer-dot" /><strong>{timer.user_name}</strong><span>{timer.repair_number ?? timer.customer_name}</span><span className="muted">{formatClock(timer.elapsed_seconds)}</span>
+            </a>
+          ))}</div>
+        </section>
+      )}
       <section className="card">
         <div className="card-header"><div><h2>{t("dashboard.recent")}</h2></div><a href={href({ name: "repairs" })}>{t("dashboard.viewAll")}</a></div>
         {data.recent.length === 0 ? <div className="empty">{loading ? t("common.loading") : t("repairs.empty")}</div> : (

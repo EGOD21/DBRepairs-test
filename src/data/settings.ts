@@ -6,11 +6,16 @@ export const settingKeys = [
   "office.companyName", "office.taxNumber", "office.address", "office.phone", "office.email", "office.website", "office.logoDataUrl",
   "ui.theme", "print.autoPrint", "print.labelSize", "print.terms", "email.signature",
   "app.icon192", "app.icon512", "app.iconMaskable", "app.iconApple", "photos.autoDeleteDays",
+  "billing.currency", "billing.taxRate", "billing.taxLabel", "billing.hourlyRate", "billing.timeRounding", "billing.invoicePrefix",
+  "billing.estimatePrefix", "billing.paymentTermsDays", "billing.estimateValidDays", "billing.invoiceNotes", "billing.paymentInstructions",
+  "billing.paymentLink", "vault.techAccess", "intake.checklist", "intake.waiver", "wipe.prefix", "wipe.statement", "unclaimed.days",
+  "notify.received", "notify.receivedSubject", "notify.receivedBody", "notify.receivedSms", "notify.ready", "notify.readySubject", "notify.readyBody", "notify.readySms",
+  "status.enabled", "status.publicUrl", "status.language",
 ] as const;
 
 export type SettingKey = typeof settingKeys[number];
 export type AppSettings = Record<SettingKey, string>;
-export type Branding = Pick<AppSettings, "office.companyName" | "office.logoDataUrl" | "ui.theme">;
+export type Branding = Pick<AppSettings, "office.companyName" | "office.logoDataUrl" | "ui.theme" | "billing.currency">;
 
 export const emptySettings = Object.fromEntries(settingKeys.map((key) => [key, ""])) as AppSettings;
 
@@ -29,11 +34,11 @@ export async function getSettings(): Promise<AppSettings> {
 
 /** Public subset used before sign-in: company name, logo and colors. */
 export async function getBranding(): Promise<Branding> {
-  const keys = ["office.companyName", "office.logoDataUrl", "ui.theme"] as const;
+  const keys = ["office.companyName", "office.logoDataUrl", "ui.theme", "billing.currency"] as const;
   if (isServerMode) {
     const response = await fetch("/api/branding");
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return { "office.companyName": "", "office.logoDataUrl": "", "ui.theme": "", ...await response.json() as Partial<Branding> };
+    return { "office.companyName": "", "office.logoDataUrl": "", "ui.theme": "", "billing.currency": "", ...await response.json() as Partial<Branding> };
   }
   return readDesktop(keys);
 }

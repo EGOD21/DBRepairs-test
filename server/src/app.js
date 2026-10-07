@@ -6,14 +6,38 @@ import { createLoginLimiter, issueSession, readCookie, SESSION_COOKIE, sessionCo
 import { ADMIN_USERNAME, findUserById, findUserByUsername, hashPassword, listUsers, newPassword, publicUser, userInput, verifyPassword } from "./users.js";
 import { registerChatRoutes } from "./chat.js";
 import { createPhotoStore, registerPhotoRoutes, removeFiles, startAutoPrune } from "./photos.js";
+import { audit, diff, registerAuditRoutes } from "./audit.js";
+import { invoiceSelect, registerBillingRoutes } from "./billing.js";
+import { registerContractRoutes, slaHours, startScheduler } from "./contracts.js";
+import { registerReportRoutes } from "./reports.js";
+import { registerRecordRoutes } from "./records.js";
+import { registerShopFloorRoutes } from "./shopfloor.js";
+import { createMessenger, registerMessagingRoutes, startNotifier } from "./messaging.js";
+import { registerKnowledgeRoutes } from "./knowledge.js";
+import { vaultKey } from "./vault.js";
 
 const repairSelect = `SELECT r.*, c.name customer_name, c.email customer_email, c.phone customer_phone, c.mobile customer_mobile,
     c.company customer_company, s.code status_code, s.label_key status_label_key,
     (SELECT COUNT(*) FROM repair_parts p WHERE p.repair_id = r.id AND p.status IN ('needed','ordered'))::integer parts_pending,
-    (SELECT COUNT(*) FROM repair_photos ph WHERE ph.repair_id = r.id)::integer photo_count
+    (SELECT COUNT(*) FROM repair_photos ph WHERE ph.repair_id = r.id)::integer photo_count,
+    (SELECT a.name FROM assets a WHERE a.id = r.asset_id) asset_name,
+    (SELECT p.repair_number FROM repairs p WHERE p.id = r.parent_repair_id) parent_repair_number,
+    (SELECT COUNT(*) FROM repairs k WHERE k.parent_repair_id = r.id)::integer comeback_count
   FROM repairs r
   JOIN customers c ON c.id = r.customer_id
   JOIN repair_statuses s ON s.id = r.status_id`;
+
+/** Saves the optional server-edition fields of a repair (equipment, intake checklist, data backup). */
+async function saveRepairExtras(db, repairId, customerId, extras) {
+  const fields = Object.keys(extras ?? {});
+  if (!fields.length) return;
+  if (extras.asset_id) {
+    const asset = await db.query("SELECT customer_id FROM assets WHERE id=$1", [extras.asset_id]);
+    if (!asset.rowCount || asset.rows[0].customer_id !== customerId) throw new ValidationError("The equipment belongs to another customer");
+  }
+  const values = fields.map((field) => (field === "intake_checklist" && extras[field] ? JSON.stringify(extras[field]) : extras[field]));
+  await db.query(`UPDATE repairs SET ${fields.map((field, i) => `${field}=$${i + 1}`).join(", ")} WHERE id=$${fields.length + 1}`, [...values, repairId]);
+}
 
 // Customer columns plus repair statistics for lists and profiles.
 const customerSelect = `SELECT c.id, c.name, c.company, c.tax_number, c.phone, c.mobile, c.email, c.address, c.notes,
@@ -40,7 +64,9 @@ const customerValues = (c) => [c.name, c.company, c.taxNumber, c.phone, c.mobile
 
 const publicPaths = new Set(["/api/health", "/api/session", "/api/login", "/api/logout", "/api/branding"]);
 // The installable-app manifest and icons are fetched by the phone before anyone signs in.
-const isPublicPath = (path) => publicPaths.has(path) || path.startsWith("/api/app/");
+// Calendar feeds are read by calendar apps, which cannot sign in; their URL carries a secret token.
+// The customer status page is public too; each link carries a random token.
+const isPublicPath = (path) => publicPaths.has(path) || path.startsWith("/api/app/") || path.startsWith("/api/calendar/") || path.startsWith("/status/");
 
 // Home-screen icon files: setting key, fallback image in /icons, size.
 const appIcons = {
@@ -100,10 +126,11 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof ValidationError) return reply.code(400).send({ error: error.message });
     if (error instanceof PortableBackupError) return reply.code(400).send({ error: error.message });
-    if (error.statusCode && ((error.statusCode >= 400 && error.statusCode < 500) || error.statusCode === 503)) {
+    if (error.statusCode && ((error.statusCode >= 400 && error.statusCode < 500) || error.statusCode === 502 || error.statusCode === 503)) {
       return reply.code(error.statusCode).send({ error: error.message });
     }
     if (error.code === "23503") return reply.code(409).send({ error: "This record is still in use" });
+    if (error.code === "23505") return reply.code(409).send({ error: "That already exists (the number or code is taken)" });
     request.log.error(error);
     return reply.code(500).send({ error: "Internal server error" });
   });
@@ -146,6 +173,7 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
     if (await findUserByUsername(pool, input.username)) return reply.code(409).send({ error: "That username is already taken" });
     const result = await pool.query(`INSERT INTO users (username, display_name, password_hash, role, active) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
       [input.username, input.displayName, await hashPassword(input.password), input.role, input.active]);
+    await audit(pool, request, { action: "create", entity: "user", entityId: result.rows[0].id, summary: `User ${input.username} (${input.role}) created` });
     return reply.code(201).send({ id: result.rows[0].id });
   });
 
@@ -166,6 +194,9 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
     await pool.query(`UPDATE users SET display_name=$1, role=$2, active=$3, password_hash=COALESCE($4, password_hash),
       session_version=session_version + $5, updated_at=now() WHERE id=$6`,
       [input.displayName, input.role, input.active, input.password ? await hashPassword(input.password) : null, endSessions ? 1 : 0, id]);
+    const changes = diff(existing, { display_name: input.displayName, role: input.role, active: input.active }, ["display_name", "role", "active"]);
+    if (input.password) changes.password = ["", "changed"];
+    await audit(pool, request, { action: "update", entity: "user", entityId: id, summary: `User ${existing.username} updated`, changes });
     return reply.code(204).send();
   });
 
@@ -181,13 +212,30 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
     return reply.header("Set-Cookie", sessionCookie(token, { maxAge, secure: request.protocol === "https" })).code(204).send();
   });
 
-  registerChatRoutes(app, pool, requireAdmin);
+  const messenger = createMessenger(pool, { smtp: config.smtp ?? null, sms: config.sms ?? null, readSettings, log: app.log });
+  registerChatRoutes(app, pool, requireAdmin, {
+    onMessage: (message, author) => {
+      void messenger.activeUserIds(author.id).then((users) => messenger.pushLater(users, {
+        title: `${message.author_name} · team chat`, body: (message.body || "📎").slice(0, 180), url: "/#/chat", tag: "chat",
+      })).catch(() => {});
+    },
+  });
+  registerMessagingRoutes(app, pool, { messenger, smtp: config.smtp ?? null, sms: config.sms ?? null, requireAdmin, readSettings });
+  registerAuditRoutes(app, pool, requireAdmin);
+  registerBillingRoutes(app, pool, { requireAdmin, readSettings });
+  registerContractRoutes(app, pool, { requireAdmin, readSettings });
 
   const photoStore = createPhotoStore(config.photosDir);
   registerPhotoRoutes(app, pool, { store: photoStore, requireAdmin, readSettings });
-  if (config.autoPrunePhotos) {
+  registerReportRoutes(app, pool, { requireAdmin });
+  registerShopFloorRoutes(app, pool, { requireAdmin, readSettings });
+  registerKnowledgeRoutes(app, pool, { requireAdmin });
+  registerRecordRoutes(app, pool, { requireAdmin, readSettings, store: photoStore, vaultKey: config.vaultKey ?? vaultKey(config.vaultSecret) });
+  if (config.backgroundJobs) {
     const stopAutoPrune = startAutoPrune(pool, photoStore, readSettings, app.log);
-    app.addHook("onClose", async () => stopAutoPrune());
+    const stopScheduler = startScheduler(pool, readSettings, app.log);
+    const stopNotifier = startNotifier(pool, messenger, app.log);
+    app.addHook("onClose", async () => { stopAutoPrune(); stopScheduler(); stopNotifier(); });
   }
 
   app.get("/api/customers", async (request) => {
@@ -216,21 +264,27 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
     const input = customerInput(request.body);
     const result = await pool.query(`INSERT INTO customers (${customerColumns})
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`, customerValues(input));
+    await audit(pool, request, { action: "create", entity: "customer", entityId: result.rows[0].id, customerId: result.rows[0].id, summary: `Customer ${input.name} created` });
     return reply.code(201).send({ id: result.rows[0].id });
   });
 
   app.put("/api/customers/:id", async (request, reply) => {
     const id = pathId(request.params.id);
     const input = customerInput(request.body);
-    const result = await pool.query(`UPDATE customers SET (${customerColumns}, updated_at) =
+    const before = (await pool.query("SELECT * FROM customers WHERE id=$1", [id])).rows[0];
+    if (!before) return replyNotFound(reply);
+    await pool.query(`UPDATE customers SET (${customerColumns}, updated_at) =
       ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16, now()) WHERE id=$17`, [...customerValues(input), id]);
-    if (!result.rowCount) return replyNotFound(reply);
+    const after = Object.fromEntries(customerColumns.split(", ").map((column, index) => [column, customerValues(input)[index]]));
+    await audit(pool, request, { action: "update", entity: "customer", entityId: id, customerId: id, summary: `Customer ${input.name} updated`, changes: diff(before, after) });
     return reply.code(204).send();
   });
 
   app.delete("/api/customers/:id", async (request, reply) => {
-    const result = await pool.query("DELETE FROM customers WHERE id=$1", [pathId(request.params.id)]);
+    const id = pathId(request.params.id);
+    const result = await pool.query("DELETE FROM customers WHERE id=$1 RETURNING name", [id]);
     if (!result.rowCount) return replyNotFound(reply);
+    await audit(pool, request, { action: "delete", entity: "customer", entityId: id, customerId: id, summary: `Customer ${result.rows[0].name} deleted` });
     return reply.code(204).send();
   });
 
@@ -249,6 +303,19 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
     const result = await pool.query(`${repairSelect} WHERE r.id=$1 LIMIT 1`, [pathId(request.params.id)]);
     if (!result.rowCount) return replyNotFound(reply);
     return result.rows[0];
+  });
+
+  // Intake details saved on their own from the repair page: equipment, backup choice, checklist.
+  app.put("/api/repairs/:id/intake", async (request, reply) => {
+    const id = pathId(request.params.id);
+    const body = request.body && typeof request.body === "object" ? request.body : {};
+    const { extras } = repairInput({ ...body, customer_id: 1, status_id: 1, reported_fault: "-" });
+    const repair = (await pool.query("SELECT customer_id, repair_number, asset_id, data_backup FROM repairs WHERE id=$1", [id])).rows[0];
+    if (!repair) return replyNotFound(reply);
+    await saveRepairExtras(pool, id, repair.customer_id, extras);
+    await audit(pool, request, { action: "update", entity: "repair", entityId: id, repairId: id, customerId: repair.customer_id, summary: `Intake details updated`,
+      changes: diff(repair, extras, Object.keys(extras).filter((key) => key !== "intake_checklist")) });
+    return reply.code(204).send();
   });
 
   app.get("/api/repairs/:id/history", async (request) =>
@@ -272,8 +339,14 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
       const { id, opened_year: openedYear } = result.rows[0];
       const repairNumber = `${openedYear}-${String(id).padStart(6, "0")}`;
       await client.query("UPDATE repairs SET repair_number=$1 WHERE id=$2", [repairNumber, id]);
+      // Contract customers get a response deadline.
+      const responseHours = await slaHours(client, input.customer_id);
+      if (responseHours) await client.query("UPDATE repairs SET sla_due_at = now() + make_interval(hours => $1::integer) WHERE id=$2", [responseHours, id]);
       await client.query("INSERT INTO repair_status_history (repair_id,status_id) VALUES ($1,$2)", [id,input.status_id]);
+      await saveRepairExtras(client, id, input.customer_id, input.extras);
+      await audit(client, request, { action: "create", entity: "repair", entityId: id, repairId: id, customerId: input.customer_id, summary: `Repair ${repairNumber} created` });
       await client.query("COMMIT");
+      messenger.notifyCustomerLater("received", id);
       return reply.code(201).send({ id });
     } catch (error) {
       await client.query("ROLLBACK");
@@ -289,7 +362,7 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
-      const current = await client.query("SELECT status_id FROM repairs WHERE id=$1 FOR UPDATE", [id]);
+      const current = await client.query("SELECT * FROM repairs WHERE id=$1 FOR UPDATE", [id]);
       if (!current.rowCount) {
         await client.query("ROLLBACK");
         return replyNotFound(reply);
@@ -298,10 +371,30 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
         ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,now()),
         closed_at=CASE WHEN (SELECT code FROM repair_statuses WHERE id=$2) IN ('DELIVERED','CANCELLED') THEN COALESCE(closed_at,now()) ELSE NULL END
         WHERE id=$22`, [...repairValues(input), input.diagnosis, input.work_performed, input.final_value, id]);
-      if (current.rows[0].status_id !== input.status_id) {
+      const before = current.rows[0];
+      await saveRepairExtras(client, id, input.customer_id, input.extras);
+      if (before.status_id !== input.status_id) {
         await client.query("INSERT INTO repair_status_history (repair_id,status_id,note) VALUES ($1,$2,$3)", [id,input.status_id,input.statusNote]);
+        // Moving a repair on counts as the first response.
+        await client.query("UPDATE repairs SET first_response_at = COALESCE(first_response_at, now()) WHERE id=$1", [id]);
       }
+      const changes = diff(before, input, [...repairColumns.split(","), "diagnosis", "work_performed", "final_value"]);
+      if (changes.status_id) {
+        const names = (await client.query("SELECT id, code FROM repair_statuses WHERE id = ANY($1)", [[before.status_id, input.status_id]])).rows;
+        const code = (statusId) => names.find((row) => row.id === statusId)?.code ?? statusId;
+        changes.status_id = [code(before.status_id), code(input.status_id)];
+      }
+      await audit(client, request, { action: "update", entity: "repair", entityId: id, repairId: id, customerId: input.customer_id,
+        summary: changes.status_id ? `Status ${changes.status_id[0]} → ${changes.status_id[1]}` : `Repair ${before.repair_number} updated`, changes });
       await client.query("COMMIT");
+      if (changes.status_id?.[1] === "READY") messenger.notifyCustomerLater("ready", id);
+      // Tell a technician on their phone when a repair is given to them.
+      if (changes.technician && input.technician) {
+        void pool.query("SELECT id FROM users WHERE active AND lower(display_name) = lower($1) AND id <> $2", [input.technician, request.user.id])
+          .then((result) => messenger.pushLater(result.rows.map((row) => row.id), { title: `Assigned to you: ${before.repair_number}`,
+            body: (input.reported_fault ?? "").slice(0, 160), url: `/#/repairs/${id}`, tag: `repair-${id}` }))
+          .catch(() => {});
+      }
       return reply.code(204).send();
     } catch (error) {
       await client.query("ROLLBACK");
@@ -327,11 +420,14 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
         await client.query(`UPDATE repair_photos p SET archived_at=now(), customer_name=c.name
           FROM repairs r JOIN customers c ON c.id = r.customer_id WHERE r.id = p.repair_id AND p.repair_id=$1`, [id]);
       }
-      const result = await client.query("DELETE FROM repairs WHERE id=$1", [id]);
+      await client.query("DELETE FROM signatures WHERE repair_id=$1 AND invoice_id IS NULL", [id]);
+      const result = await client.query("DELETE FROM repairs WHERE id=$1 RETURNING repair_number, customer_id", [id]);
       if (!result.rowCount) {
         await client.query("ROLLBACK");
         return replyNotFound(reply);
       }
+      await audit(client, request, { action: "delete", entity: "repair", entityId: id, repairId: id, customerId: result.rows[0].customer_id,
+        summary: `Repair ${result.rows[0].repair_number} deleted${deletePhotos ? " with its photos" : ""}` });
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK");
@@ -364,27 +460,41 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,
         CASE WHEN $8 IN ('ordered','received','installed') THEN now() END,
         CASE WHEN $8 IN ('received','installed') THEN now() END) RETURNING id`, [repairId, ...partValues(input)]);
+    await audit(pool, request, { action: "create", entity: "part", entityId: result.rows[0].id, repairId, summary: `Part added: ${input.name} (${input.status})` });
     return reply.code(201).send({ id: result.rows[0].id });
   });
 
   app.put("/api/parts/:id", async (request, reply) => {
     const input = partInput(request.body);
+    const partId = pathId(request.params.id);
+    const before = (await pool.query("SELECT * FROM repair_parts WHERE id=$1", [partId])).rows[0];
+    if (!before) return replyNotFound(reply);
     const result = await pool.query(`UPDATE repair_parts SET (${partColumns},updated_at) = ($1,$2,$3,$4,$5,$6,$7,$8,now()),
       ordered_at = CASE WHEN $7 IN ('ordered','received','installed') THEN COALESCE(ordered_at, now()) ELSE NULL END,
       received_at = CASE WHEN $7 IN ('received','installed') THEN COALESCE(received_at, now()) ELSE NULL END
-      WHERE id=$9`, [...partValues(input), pathId(request.params.id)]);
+      WHERE id=$9`, [...partValues(input), partId]);
     if (!result.rowCount) return replyNotFound(reply);
+    await audit(pool, request, { action: "update", entity: "part", entityId: partId, repairId: before.repair_id, summary: `Part ${input.name} updated`,
+      changes: diff(before, input, partColumns.split(",")) });
     return reply.code(204).send();
   });
 
   app.delete("/api/parts/:id", async (request, reply) => {
-    const result = await pool.query("DELETE FROM repair_parts WHERE id=$1", [pathId(request.params.id)]);
+    const result = await pool.query("DELETE FROM repair_parts WHERE id=$1 RETURNING repair_id, name, stock_item_id, quantity, status", [pathId(request.params.id)]);
     if (!result.rowCount) return replyNotFound(reply);
+    // A part taken from stock by mistake goes back on the shelf.
+    const removed = result.rows[0];
+    if (removed.stock_item_id && removed.status === "installed") {
+      await pool.query("UPDATE stock_items SET quantity = quantity + $1, updated_at=now() WHERE id=$2", [removed.quantity, removed.stock_item_id]);
+      await pool.query("INSERT INTO stock_movements (item_id, change, reason, repair_id, user_id, note) VALUES ($1,$2,'returned',$3,$4,'Removed from repair')",
+        [removed.stock_item_id, removed.quantity, removed.repair_id, request.user.id]);
+    }
+    await audit(pool, request, { action: "delete", entity: "part", entityId: pathId(request.params.id), repairId: result.rows[0].repair_id, summary: `Part removed: ${result.rows[0].name}` });
     return reply.code(204).send();
   });
 
   app.get("/api/dashboard", async () => {
-    const [counts, recent] = await Promise.all([
+    const [counts, recent, money] = await Promise.all([
       pool.query(`SELECT
         (SELECT COUNT(*) FROM repairs r JOIN repair_statuses s ON s.id=r.status_id WHERE s.code NOT IN ('DELIVERED','CANCELLED'))::integer open_repairs,
         (SELECT COUNT(*) FROM repairs r JOIN repair_statuses s ON s.id=r.status_id WHERE s.code='WAITING_CUSTOMER')::integer waiting_customer,
@@ -392,13 +502,23 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
         (SELECT COUNT(*) FROM repairs r WHERE r.closed_at IS NOT NULL AND r.closed_at::date = CURRENT_DATE)::integer closed_today,
         (SELECT COUNT(*) FROM repairs r JOIN repair_statuses s ON s.id=r.status_id
           WHERE s.code NOT IN ('DELIVERED','CANCELLED') AND r.due_date < CURRENT_DATE)::integer overdue,
-        (SELECT COUNT(*) FROM repair_parts p WHERE p.status='needed')::integer parts_to_order`),
+        (SELECT COUNT(*) FROM repair_parts p WHERE p.status='needed')::integer parts_to_order,
+        (SELECT COUNT(*) FROM stock_items WHERE active AND reorder_level > 0 AND quantity <= reorder_level)::integer low_stock,
+        (SELECT COUNT(*) FROM supplier_returns WHERE status IN ('to_ship','shipped'))::integer open_returns`),
       pool.query(`${repairSelect} ORDER BY r.id DESC LIMIT 8`),
+      pool.query(`SELECT
+          COALESCE(SUM(balance) FILTER (WHERE state IN ('unpaid','partial','overdue')), 0)::float8 outstanding,
+          COALESCE(SUM(balance) FILTER (WHERE state = 'overdue'), 0)::float8 overdue_amount,
+          COUNT(*) FILTER (WHERE state = 'overdue')::integer overdue_invoices,
+          (SELECT COALESCE(SUM(minutes), 0) FROM time_entries WHERE invoice_id IS NULL AND billable)::integer unbilled_minutes,
+          (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE date_trunc('month', paid_at) = date_trunc('month', CURRENT_DATE))::float8 paid_this_month
+        FROM (${invoiceSelect} WHERE i.kind = 'invoice') x`),
     ]);
     const row = counts.rows[0];
     return {
       stats: { openRepairs: row.open_repairs, waitingCustomer: row.waiting_customer, ready: row.ready, closedToday: row.closed_today,
-        overdue: row.overdue, partsToOrder: row.parts_to_order },
+        overdue: row.overdue, partsToOrder: row.parts_to_order, lowStock: row.low_stock, openReturns: row.open_returns },
+      billing: money.rows[0],
       recent: recent.rows,
     };
   });
@@ -412,7 +532,7 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
   }
 
   // Logo, name and colors are shown on the sign-in page, so they are public.
-  app.get("/api/branding", async () => readSettings(["office.companyName", "office.logoDataUrl", "ui.theme"]));
+  app.get("/api/branding", async () => readSettings(["office.companyName", "office.logoDataUrl", "ui.theme", "billing.currency"]));
 
   app.get("/api/settings", async () => readSettings(settingKeys));
 
@@ -467,6 +587,8 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
         await client.query(`INSERT INTO app_settings (key,value) VALUES ($1,$2)
           ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value`, [key, value]);
       }
+      // Logos and icons are large, so only the names of changed settings are kept.
+      await audit(client, request, { action: "update", entity: "settings", summary: `Settings changed: ${Object.keys(settings).join(", ").slice(0, 400)}` });
       await client.query("COMMIT");
       return reply.code(204).send();
     } catch (error) {
@@ -495,6 +617,8 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
     try {
       await restorePostgresBackup(config.database, request.body);
       if (migrateDatabase) await migrateDatabase();
+      // The restored data may not contain this user any more, so a failed log entry is ignored.
+      await audit(pool, request, { action: "restore", entity: "backup", summary: "Database backup restored" }).catch(() => {});
       return reply.code(204).send();
     } finally {
       restoring = false;
@@ -517,6 +641,7 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
     restoring = true;
     try {
       await importPortableBackup(pool, request.body);
+      await audit(pool, request, { action: "restore", entity: "backup", summary: "Portable backup restored" }).catch(() => {});
       return reply.code(204).send();
     } finally {
       restoring = false;
