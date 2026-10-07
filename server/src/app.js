@@ -12,6 +12,8 @@ import { registerContractRoutes, slaHours, startScheduler } from "./contracts.js
 import { registerReportRoutes } from "./reports.js";
 import { registerRecordRoutes } from "./records.js";
 import { registerShopFloorRoutes } from "./shopfloor.js";
+import { createMessenger, registerMessagingRoutes, startNotifier } from "./messaging.js";
+import { registerKnowledgeRoutes } from "./knowledge.js";
 import { vaultKey } from "./vault.js";
 
 const repairSelect = `SELECT r.*, c.name customer_name, c.email customer_email, c.phone customer_phone, c.mobile customer_mobile,
@@ -63,7 +65,8 @@ const customerValues = (c) => [c.name, c.company, c.taxNumber, c.phone, c.mobile
 const publicPaths = new Set(["/api/health", "/api/session", "/api/login", "/api/logout", "/api/branding"]);
 // The installable-app manifest and icons are fetched by the phone before anyone signs in.
 // Calendar feeds are read by calendar apps, which cannot sign in; their URL carries a secret token.
-const isPublicPath = (path) => publicPaths.has(path) || path.startsWith("/api/app/") || path.startsWith("/api/calendar/");
+// The customer status page is public too; each link carries a random token.
+const isPublicPath = (path) => publicPaths.has(path) || path.startsWith("/api/app/") || path.startsWith("/api/calendar/") || path.startsWith("/status/");
 
 // Home-screen icon files: setting key, fallback image in /icons, size.
 const appIcons = {
@@ -123,7 +126,7 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof ValidationError) return reply.code(400).send({ error: error.message });
     if (error instanceof PortableBackupError) return reply.code(400).send({ error: error.message });
-    if (error.statusCode && ((error.statusCode >= 400 && error.statusCode < 500) || error.statusCode === 503)) {
+    if (error.statusCode && ((error.statusCode >= 400 && error.statusCode < 500) || error.statusCode === 502 || error.statusCode === 503)) {
       return reply.code(error.statusCode).send({ error: error.message });
     }
     if (error.code === "23503") return reply.code(409).send({ error: "This record is still in use" });
@@ -209,7 +212,15 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
     return reply.header("Set-Cookie", sessionCookie(token, { maxAge, secure: request.protocol === "https" })).code(204).send();
   });
 
-  registerChatRoutes(app, pool, requireAdmin);
+  const messenger = createMessenger(pool, { smtp: config.smtp ?? null, sms: config.sms ?? null, readSettings, log: app.log });
+  registerChatRoutes(app, pool, requireAdmin, {
+    onMessage: (message, author) => {
+      void messenger.activeUserIds(author.id).then((users) => messenger.pushLater(users, {
+        title: `${message.author_name} · team chat`, body: (message.body || "📎").slice(0, 180), url: "/#/chat", tag: "chat",
+      })).catch(() => {});
+    },
+  });
+  registerMessagingRoutes(app, pool, { messenger, smtp: config.smtp ?? null, sms: config.sms ?? null, requireAdmin, readSettings });
   registerAuditRoutes(app, pool, requireAdmin);
   registerBillingRoutes(app, pool, { requireAdmin, readSettings });
   registerContractRoutes(app, pool, { requireAdmin, readSettings });
@@ -218,11 +229,13 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
   registerPhotoRoutes(app, pool, { store: photoStore, requireAdmin, readSettings });
   registerReportRoutes(app, pool, { requireAdmin });
   registerShopFloorRoutes(app, pool, { requireAdmin, readSettings });
+  registerKnowledgeRoutes(app, pool, { requireAdmin });
   registerRecordRoutes(app, pool, { requireAdmin, readSettings, store: photoStore, vaultKey: config.vaultKey ?? vaultKey(config.vaultSecret) });
   if (config.backgroundJobs) {
     const stopAutoPrune = startAutoPrune(pool, photoStore, readSettings, app.log);
     const stopScheduler = startScheduler(pool, readSettings, app.log);
-    app.addHook("onClose", async () => { stopAutoPrune(); stopScheduler(); });
+    const stopNotifier = startNotifier(pool, messenger, app.log);
+    app.addHook("onClose", async () => { stopAutoPrune(); stopScheduler(); stopNotifier(); });
   }
 
   app.get("/api/customers", async (request) => {
@@ -333,6 +346,7 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
       await saveRepairExtras(client, id, input.customer_id, input.extras);
       await audit(client, request, { action: "create", entity: "repair", entityId: id, repairId: id, customerId: input.customer_id, summary: `Repair ${repairNumber} created` });
       await client.query("COMMIT");
+      messenger.notifyCustomerLater("received", id);
       return reply.code(201).send({ id });
     } catch (error) {
       await client.query("ROLLBACK");
@@ -373,6 +387,14 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
       await audit(client, request, { action: "update", entity: "repair", entityId: id, repairId: id, customerId: input.customer_id,
         summary: changes.status_id ? `Status ${changes.status_id[0]} → ${changes.status_id[1]}` : `Repair ${before.repair_number} updated`, changes });
       await client.query("COMMIT");
+      if (changes.status_id?.[1] === "READY") messenger.notifyCustomerLater("ready", id);
+      // Tell a technician on their phone when a repair is given to them.
+      if (changes.technician && input.technician) {
+        void pool.query("SELECT id FROM users WHERE active AND lower(display_name) = lower($1) AND id <> $2", [input.technician, request.user.id])
+          .then((result) => messenger.pushLater(result.rows.map((row) => row.id), { title: `Assigned to you: ${before.repair_number}`,
+            body: (input.reported_fault ?? "").slice(0, 160), url: `/#/repairs/${id}`, tag: `repair-${id}` }))
+          .catch(() => {});
+      }
       return reply.code(204).send();
     } catch (error) {
       await client.query("ROLLBACK");

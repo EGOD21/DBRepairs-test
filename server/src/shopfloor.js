@@ -109,6 +109,8 @@ export function toIcs(appointments, calendarName) {
       lines.push(`DTSTART;VALUE=DATE:${icsDate(a.starts_at)}`, `DTEND;VALUE=DATE:${icsDate(end.toISOString())}`);
     } else {
       lines.push(`DTSTART:${icsTime(a.starts_at)}`, `DTEND:${icsTime(a.ends_at)}`);
+      // Phones remind the technician 30 minutes before (plus travel time).
+      if (a.status === "scheduled") lines.push("BEGIN:VALARM", "ACTION:DISPLAY", `DESCRIPTION:${icsText(a.title)}`, `TRIGGER:-PT${30 + (a.travel_minutes ?? 0)}M`, "END:VALARM");
     }
     lines.push(`SUMMARY:${icsText([a.title, a.customer_name].filter(Boolean).join(" — "))}`);
     if (a.address) lines.push(`LOCATION:${icsText(a.address)}`);

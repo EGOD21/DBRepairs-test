@@ -10,6 +10,7 @@ import { Contract, listContracts, listSla, SlaRepair } from "../data/contracts";
 import { UsageMeter } from "../components/ContractsCard";
 import { listUnclaimed, markReminded, UnclaimedRepair } from "../data/shopfloor";
 import { mailtoLink, smsLink } from "../lib/email";
+import { draftFromMailto, useComposer } from "../composer";
 import { fill } from "../lib/format";
 import { useSession } from "../session";
 import { useI18n } from "../i18n/I18nProvider";
@@ -25,6 +26,7 @@ export default function DashboardPage() {
   const [sla, setSla] = useState<SlaRepair[]>([]);
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [unclaimed, setUnclaimed] = useState<UnclaimedRepair[]>([]);
+  const composer = useComposer();
 
   useEffect(() => {
     let active = true;
@@ -105,8 +107,12 @@ export default function DashboardPage() {
                 <td data-label={t("unclaimed.reminded")} className="muted">{item.pickup_reminded_at ? formatDbDate(item.pickup_reminded_at) : t("unclaimed.never")}</td>
                 <td className="actions"><div className="page-actions">
                   {item.customer_email && <a className="btn btn-sm" href={mailtoLink(item.customer_email, fill(t("unclaimed.emailSubject"), { number: item.repair_number }), fill(t("unclaimed.emailBody"), { name: item.customer_name.split(/\s+/)[0], number: item.repair_number, days: item.days_waiting, device: deviceLabel(item) }))}
-                    onClick={() => void markReminded(item.id).then(() => setUnclaimed((list) => list.map((u) => u.id === item.id ? { ...u, pickup_reminded_at: new Date().toISOString() } : u)))}><Icon name="mail" size={14} />{t("unclaimed.remind")}</a>}
-                  {item.customer_phone && <a className="btn btn-sm btn-icon" href={smsLink(item.customer_phone)} aria-label={t("customer.text")} onClick={() => void markReminded(item.id)}><Icon name="message" size={14} /></a>}
+                    onClick={(event) => {
+                      composer.intercept(draftFromMailto(event.currentTarget.getAttribute("href") ?? "", { repair_id: item.id, customer_id: item.customer_id }))(event);
+                      void markReminded(item.id).then(() => setUnclaimed((list) => list.map((u) => u.id === item.id ? { ...u, pickup_reminded_at: new Date().toISOString() } : u)));
+                    }}><Icon name="mail" size={14} />{t("unclaimed.remind")}</a>}
+                  {item.customer_phone && <a className="btn btn-sm btn-icon" href={smsLink(item.customer_phone)} aria-label={t("customer.text")}
+                    onClick={(event) => { composer.intercept({ channel: "sms", to: item.customer_phone!, body: fill(t("unclaimed.sms"), { number: item.repair_number, days: item.days_waiting }), repair_id: item.id, customer_id: item.customer_id })(event); void markReminded(item.id); }}><Icon name="message" size={14} /></a>}
                 </div></td>
               </tr>
             ))}</tbody>

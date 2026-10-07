@@ -1,4 +1,6 @@
 import { createSessionKey } from "./auth.js";
+import { smtpConfig } from "./smtp.js";
+import { twilioConfig } from "./messaging.js";
 
 function positiveInteger(value, fallback) {
   const parsed = Number(value);
@@ -43,6 +45,9 @@ export function loadConfig(env = process.env) {
     backgroundJobs: true,
     // Encrypts the password vault. Without it the vault stays off.
     vaultSecret: env.VAULT_KEY?.trim() || "",
+    // Optional email (SMTP_*) and text messages (TWILIO_*). Without them the app opens your own email app instead.
+    smtp: smtpConfig(env),
+    sms: twilioConfig(env),
     auth: { password, sessionKey: createSessionKey(password, env.SESSION_SECRET ?? "") },
   };
 }

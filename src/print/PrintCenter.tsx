@@ -140,6 +140,7 @@ function IntakeHalf({ title, data, office, shopCopy = false }: { title: string; 
           <p>{data.checklist.map((item) => `${item.checked ? "☑" : "☐"} ${item.label}`).join("   ")}</p></div>
       )}
       {shopCopy && <div className="slip-row internal"><span>{t("repair.internalNotes")}</span><p>{data.internalNotes || "—"}</p></div>}
+      {!shopCopy && data.trackUrl && <div className="slip-row"><span>{t("print.trackOnline")}</span><p className="track-url">{data.trackUrl}</p></div>}
       {!shopCopy && (office.terms || data.waiver) && <p className="slip-terms">{[data.waiver, office.terms].filter(Boolean).join("\n")}</p>}
       <div className="signature-row">
         <div>{data.intakeSignature && <img className="slip-signature" src={data.intakeSignature.image} alt="" />}<span>{t("print.customerSignature")}{data.intakeSignature ? ` — ${data.intakeSignature.name}` : ""}</span></div>
@@ -192,6 +193,7 @@ function Receipt({ data, office, sheetRef }: ReceiptProps) {
       {data.dueDate && <div className="receipt-row"><span>{t("repair.dueDate")}</span><span>{data.dueDate}</span></div>}
       {data.estimate && <div className="receipt-row"><span>{t("repair.estimatedValue")}</span><span>{data.estimate}</span></div>}
       {data.deposit && <div className="receipt-row"><span>{t("repair.deposit")}</span><span>{data.deposit}</span></div>}
+      {data.trackUrl && <><hr /><p>{t("print.trackOnline")}</p><p className="track-url">{data.trackUrl}</p></>}
       {office.terms && <><hr /><p>{office.terms}</p></>}
       <p style={{ marginTop: "8mm", borderTop: "1px solid #777", paddingTop: "1mm", textAlign: "center" }}>{t("print.customerSignature")}</p>
     </section>

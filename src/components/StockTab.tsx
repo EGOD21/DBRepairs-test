@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import Icon from "./Icon";
+import ScanButton from "./ScanButton";
 import Modal from "./Modal";
 import { adjustStock, blankStock, createStock, deleteStock, listStock, StockInput, StockItem, StockMovement, stockMovements, stockReasons, updateStock } from "../data/shopfloor";
 import { formatDbDate } from "../data/dates";
@@ -34,7 +35,7 @@ export default function StockTab() {
   return (
     <section className="card">
       <div className="toolbar">
-        <div className="search"><Icon name="search" size={16} /><input className="input" type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t("stock.search")} /></div>
+        <div className="search"><Icon name="search" size={16} /><input className="input" type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t("stock.search")} /><ScanButton onResult={setSearch} /></div>
         <label className="check"><input type="checkbox" checked={lowOnly} onChange={(e) => setLowOnly(e.target.checked)} />{t("stock.lowOnly")}{low > 0 && !lowOnly ? ` (${low})` : ""}</label>
         <span className="count">{fill(t("stock.summary"), { count: items.length, value: formatMoney(value) })}</span>
         <button type="button" className="btn btn-primary btn-sm" onClick={() => setEditing("new")}><Icon name="plus" size={15} />{t("stock.add")}</button>

@@ -9,6 +9,8 @@ export const settingKeys = [
   "billing.currency", "billing.taxRate", "billing.taxLabel", "billing.hourlyRate", "billing.timeRounding", "billing.invoicePrefix",
   "billing.estimatePrefix", "billing.paymentTermsDays", "billing.estimateValidDays", "billing.invoiceNotes", "billing.paymentInstructions",
   "billing.paymentLink", "vault.techAccess", "intake.checklist", "intake.waiver", "wipe.prefix", "wipe.statement", "unclaimed.days",
+  "notify.received", "notify.receivedSubject", "notify.receivedBody", "notify.receivedSms", "notify.ready", "notify.readySubject", "notify.readyBody", "notify.readySms",
+  "status.enabled", "status.publicUrl", "status.language",
 ] as const;
 
 export type SettingKey = typeof settingKeys[number];

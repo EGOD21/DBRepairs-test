@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import Modal from "./Modal";
 import Icon from "./Icon";
+import ScanButton from "./ScanButton";
 import { listStock, StockItem, takeFromStock } from "../data/shopfloor";
 import { formatMoney } from "../lib/format";
 import { useI18n } from "../i18n/I18nProvider";
@@ -37,7 +38,7 @@ export default function UseStockModal({ repairId, onClose, onSaved }: { repairId
       footer={<><button type="button" className="btn" onClick={onClose}>{t("common.cancel")}</button>
         <button type="button" className="btn btn-primary" disabled={!chosen} onClick={() => void save()}>{t("stock.use")}</button></>}>
       <div className="modal-body">
-        <div className="search"><Icon name="search" size={16} /><input className="input" type="search" autoFocus value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t("stock.search")} /></div>
+        <div className="search"><Icon name="search" size={16} /><input className="input" type="search" autoFocus value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t("stock.search")} /><ScanButton onResult={setSearch} /></div>
         <div className="pick-list">{items.slice(0, 50).map((item) => (
           <button key={item.id} type="button" className={`pick-item${chosen?.id === item.id ? " active" : ""}`} onClick={() => setChosen(item)} disabled={item.quantity <= 0}>
             <span><strong>{item.name}</strong><small className="muted">{[item.sku, item.location].filter(Boolean).join(" · ")}</small></span>

@@ -18,6 +18,7 @@ import { mailtoLink } from "../lib/email";
 import { emailSignature } from "../lib/emailTemplates";
 import { useI18n } from "../i18n/I18nProvider";
 import { useSession } from "../session";
+import { draftFromMailto, useComposer } from "../composer";
 import { href, navigate } from "../router";
 
 type LineForm = Omit<InvoiceLine, "quantity" | "unit_price"> & { quantity: string; unit_price: string; key: number };
@@ -43,6 +44,7 @@ export default function InvoicePage({ id }: { id: number }) {
   const [busy, setBusy] = useState(false);
   const [dialog, setDialog] = useState<"payment" | "approve" | "print" | null>(null);
   const [missing, setMissing] = useState(false);
+  const composer = useComposer();
 
   function apply(next: InvoiceDetail) {
     const nextForm = toForm(next);
@@ -138,7 +140,10 @@ export default function InvoicePage({ id }: { id: number }) {
         </div>
         <div className="page-actions">
           <button type="button" className="btn" onClick={() => setDialog("print")} disabled={dirty} title={dirty ? t("billing.saveFirst") : undefined}><Icon name="printer" size={16} />{t("print.print")}</button>
-          {doc.customer_email ? <a className="btn" href={emailHref} onClick={() => { if (doc.status === "draft") void run(() => setInvoiceStatus(doc.id, "sent")); }}><Icon name="mail" size={16} />{t("email.send")}</a>
+          {doc.customer_email ? <a className="btn" href={emailHref} onClick={(event) => {
+            composer.intercept(draftFromMailto(emailHref, { customer_id: doc.customer_id, repair_id: doc.repair_id, invoice_id: doc.id }))(event);
+            if (doc.status === "draft") void run(() => setInvoiceStatus(doc.id, "sent"));
+          }}><Icon name="mail" size={16} />{t("email.send")}</a>
             : <button type="button" className="btn" disabled title={t("email.noAddress")}><Icon name="mail" size={16} />{t("email.send")}</button>}
           {isInvoice && doc.state !== "void" && doc.balance > 0 && <button type="button" className="btn" disabled={dirty || busy} onClick={() => setDialog("payment")}><Icon name="receipt" size={16} />{t("billing.recordPayment")}</button>}
           {!isInvoice && !readOnly && <button type="button" className="btn" disabled={dirty || busy} onClick={() => setDialog("approve")}><Icon name="pencil" size={16} />{t("billing.getApproval")}</button>}

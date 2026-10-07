@@ -194,6 +194,18 @@ export const SETTING_LIMITS = {
   // Shop floor (see shopfloor.js).
   "unclaimed.days": 5,
   "unclaimed.policy": 2000,
+  // Customer messages and the public status page (see messaging.js).
+  "notify.received": 1,
+  "notify.receivedSubject": 300,
+  "notify.receivedBody": 4000,
+  "notify.receivedSms": 600,
+  "notify.ready": 1,
+  "notify.readySubject": 300,
+  "notify.readyBody": 4000,
+  "notify.readySms": 600,
+  "status.enabled": 1,
+  "status.publicUrl": 300,
+  "status.language": 10,
 };
 
 const NUMBER_SETTINGS = ["billing.taxRate", "billing.hourlyRate", "billing.timeRounding", "billing.paymentTermsDays", "billing.estimateValidDays", "photos.autoDeleteDays", "unclaimed.days"];
@@ -227,6 +239,8 @@ export function settingsInput(value) {
     if (NUMBER_SETTINGS.includes(key) && cleaned && !/^\d{1,6}(\.\d{1,3})?$/.test(cleaned)) throw new ValidationError(`${key} must be a number`);
     if (key === "photos.autoDeleteDays" && cleaned && !/^\d{1,5}$/.test(cleaned)) throw new ValidationError("photos.autoDeleteDays must be a whole number of days");
     if (key === "billing.currency" && cleaned && !/^[A-Z]{3}$/.test(cleaned)) throw new ValidationError("billing.currency must be a 3-letter code such as USD");
+    if (key === "status.publicUrl" && cleaned && !/^https:\/\/[^\s/]+(:\d+)?\/?$/.test(cleaned)) throw new ValidationError("status.publicUrl must be an https:// address without a path, for example https://shop.tail1234.ts.net:8443");
+    if (key === "status.language" && cleaned && !["en", "pt-PT", "es", "fr"].includes(cleaned)) throw new ValidationError("status.language is not supported");
     if (key === "billing.paymentLink" && cleaned) webUrl(cleaned.replace(/\{(amount|number)\}/g, "0"), key);
     result[key] = cleaned;
   }

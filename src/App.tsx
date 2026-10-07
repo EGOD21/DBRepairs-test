@@ -21,8 +21,10 @@ import InvoicePage from "./pages/InvoicePage";
 import ReportsPage from "./pages/ReportsPage";
 import AssetPage from "./pages/AssetPage";
 import SchedulePage from "./pages/SchedulePage";
+import KnowledgePage from "./pages/KnowledgePage";
 import RunningTimerChip from "./components/RunningTimerChip";
 import { SessionProvider, useSession } from "./session";
+import { ComposerProvider } from "./composer";
 import { getLastSeen, unreadCount } from "./data/chat";
 
 type AuthState = "checking" | "signedOut" | "signedIn";
@@ -49,7 +51,9 @@ export default function App() {
   if (auth === "signedOut") return <LoginPage onSignedIn={(current) => { setUser(current); setAuth("signedIn"); }} />;
   return (
     <SessionProvider user={user}>
-      <Workspace onSignOut={isServerMode ? () => void logout().finally(() => { setUser(null); setAuth("signedOut"); }) : undefined} />
+      <ComposerProvider>
+        <Workspace onSignOut={isServerMode ? () => void logout().finally(() => { setUser(null); setAuth("signedOut"); }) : undefined} />
+      </ComposerProvider>
     </SessionProvider>
   );
 }
@@ -103,6 +107,7 @@ function Workspace({ onSignOut }: { onSignOut?: () => void }) {
     { route: { name: "customers" }, icon: "users", label: t("nav.customers"), phone: true },
     ...(teamFeatures ? [{ route: { name: "billing" } as Route, icon: "receipt" as IconName, label: t("nav.billing"), phone: true }] : []),
     ...(teamFeatures ? [{ route: { name: "schedule" } as Route, icon: "calendar" as IconName, label: t("nav.schedule") }] : []),
+    ...(teamFeatures ? [{ route: { name: "knowledge" } as Route, icon: "book" as IconName, label: t("nav.knowledge") }] : []),
     { route: { name: "parts" }, icon: "package", label: t("nav.parts"), badge: partsToOrder || undefined },
     ...(teamFeatures && isAdmin ? [{ route: { name: "reports" } as Route, icon: "chart" as IconName, label: t("nav.reports") }] : []),
     ...(teamFeatures ? [{ route: { name: "chat" } as Route, icon: "message" as IconName, label: t("nav.chat"), badge: unread || undefined }] : []),
@@ -160,6 +165,7 @@ function Workspace({ onSignOut }: { onSignOut?: () => void }) {
         {route.name === "chat" && (teamFeatures ? <ChatPage /> : <DashboardPage />)}
         {route.name === "settings" && <SettingsPage section={route.section} />}
         {route.name === "billing" && (teamFeatures ? <BillingPage tab={route.tab} /> : <DashboardPage />)}
+        {route.name === "knowledge" && (teamFeatures ? <KnowledgePage id={route.id} /> : <DashboardPage />)}
         {route.name === "schedule" && (teamFeatures ? <SchedulePage /> : <DashboardPage />)}
         {route.name === "asset" && (teamFeatures ? <AssetPage key={route.id} id={route.id} /> : <DashboardPage />)}
         {route.name === "reports" && (teamFeatures && isAdmin ? <ReportsPage /> : <DashboardPage />)}

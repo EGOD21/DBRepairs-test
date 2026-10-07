@@ -12,6 +12,7 @@ import NetworkCard from "../components/NetworkCard";
 import VaultCard from "../components/VaultCard";
 import WipesCard from "../components/WipesCard";
 import { isServerMode } from "../data/runtime";
+import { draftFromMailto, useComposer } from "../composer";
 import { Customer, deleteCustomer, getCustomer, toCustomerInput } from "../data/customers";
 import { isOverdue, listRepairsByCustomer, Repair } from "../data/repairs";
 import { getSettings } from "../data/settings";
@@ -33,6 +34,7 @@ export default function CustomerProfilePage({ id }: { id: number }) {
   const [error, setError] = useState("");
   const [editing, setEditing] = useState(false);
   const [tab, setTab] = useState<typeof profileTabs[number]>("overview");
+  const composer = useComposer();
 
   async function load() {
     const [c, r] = await Promise.all([getCustomer(id), listRepairsByCustomer(id)]);
@@ -89,9 +91,9 @@ export default function CustomerProfilePage({ id }: { id: number }) {
           {customer.email && <p><a href={mailtoLink(customer.email)}>{customer.email}</a></p>}
         </div>
         <div className="page-actions">
-          {customer.email && <a className="btn" href={emailHref}><Icon name="mail" size={16} />{t("email.send")}</a>}
+          {customer.email && <a className="btn" href={emailHref} onClick={composer.intercept(draftFromMailto(emailHref, { customer_id: customer.id }))}><Icon name="mail" size={16} />{t("email.send")}</a>}
           {phone && <a className="btn" href={telLink(phone)}><Icon name="phone" size={16} />{t("customer.call")}</a>}
-          {customer.mobile && <a className="btn btn-icon" href={smsLink(customer.mobile)} title={t("customer.text")} aria-label={t("customer.text")}><Icon name="message" size={16} /></a>}
+          {customer.mobile && <a className="btn btn-icon" href={smsLink(customer.mobile)} onClick={composer.intercept({ channel: "sms", to: customer.mobile, body: "", customer_id: customer.id })} title={t("customer.text")} aria-label={t("customer.text")}><Icon name="message" size={16} /></a>}
           <button type="button" className="btn" onClick={() => setEditing(true)}><Icon name="pencil" size={16} />{t("common.edit")}</button>
           <button type="button" className="btn btn-icon btn-danger" onClick={() => void remove()} title={t("common.delete")} aria-label={t("common.delete")}><Icon name="trash" size={16} /></button>
           <a className="btn btn-primary" href={href({ name: "repairs", filter: `new:${customer.id}` })}><Icon name="plus" size={16} />{t("repair.new")}</a>

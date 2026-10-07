@@ -5,6 +5,8 @@ export type RepairPrintData = {
   /** Server edition intake: ticked checklist, backup choice, waiver text and the customer's intake signature. */
   checklist?: { label: string; checked: boolean }[]; dataBackup?: string; waiver?: string; equipment?: string;
   intakeSignature?: { image: string; name: string };
+  /** Public "track your repair" page, when the status page is turned on. */
+  trackUrl?: string;
 };
 
 export type OfficeSettings = {

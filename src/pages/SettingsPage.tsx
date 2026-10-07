@@ -20,6 +20,9 @@ import { emptyAppIcons, makeAppIcons } from "../lib/appIcons";
 import { MyAccountSection, TeamSection } from "../components/TeamSettings";
 import StorageSettings from "../components/StorageSettings";
 import AuditLogSettings from "../components/AuditLogSettings";
+import PushToggle from "../components/PushToggle";
+import ChecklistTemplateSettings from "../components/ChecklistTemplateSettings";
+import { defaultTemplates, messagingStatus, MessagingStatus } from "../data/comms";
 import { href } from "../router";
 
 type Notice = { tone: "success" | "error"; text: string } | null;
@@ -118,6 +121,7 @@ export default function SettingsPage({ section }: { section?: string }) {
 
   const businessKeys: SettingKey[] = ["office.companyName", "office.taxNumber", "office.address", "office.phone", "office.email", "office.website"];
   const printKeys: SettingKey[] = ["print.autoPrint", "print.labelSize", "print.terms"];
+  const notifyKeys: SettingKey[] = ["notify.received", "notify.receivedSubject", "notify.receivedBody", "notify.receivedSms", "notify.ready", "notify.readySubject", "notify.readyBody", "notify.readySms", "status.enabled", "status.publicUrl", "status.language"];
   const intakeKeys: SettingKey[] = ["intake.checklist", "intake.waiver", "vault.techAccess", "wipe.prefix", "wipe.statement", "unclaimed.days"];
   const billingKeys: SettingKey[] = ["billing.currency", "billing.hourlyRate", "billing.taxLabel", "billing.taxRate", "billing.timeRounding", "billing.paymentTermsDays",
     "billing.invoicePrefix", "billing.estimatePrefix", "billing.estimateValidDays", "billing.invoiceNotes", "billing.paymentInstructions", "billing.paymentLink"];
@@ -210,7 +214,7 @@ export default function SettingsPage({ section }: { section?: string }) {
     ...(isAdmin ? [["business", "building", t("settings.office")], ["appearance", "palette", t("settings.appearance")], ["printing", "printer", t("settings.printing")],
       ["email", "mail", t("settings.emailSection")]] as [string, IconName, string][] : []),
     ...(isAdmin && teamFeatures ? [["team", "users", t("team.title")] as [string, IconName, string]] : []),
-    ...(isAdmin && isServerMode ? [["billing", "receipt", t("settings.billing")], ["intake", "lock", t("settings.intake")], ["storage", "hardDrive", t("storage.title")],
+    ...(isAdmin && isServerMode ? [["billing", "receipt", t("settings.billing")], ["intake", "lock", t("settings.intake")], ["notifications", "bell", t("settings.notifications")], ["checklists", "check", t("checklist.templates")], ["storage", "hardDrive", t("storage.title")],
       ["activity", "activity", t("activity.title")]] as [string, IconName, string][] : []),
     ["language", "globe", t("settings.language")],
     ...(isAdmin ? [["data", "database", t("settings.data")] as [string, IconName, string]] : []),
@@ -232,7 +236,7 @@ export default function SettingsPage({ section }: { section?: string }) {
         </nav>
         <div className="settings-sections">
           <OpenSection.Provider value={open}>
-          {teamFeatures && <Section id="account" icon="users" title={t("account.title")}><MyAccountSection /></Section>}
+          {teamFeatures && <Section id="account" icon="users" title={t("account.title")}><div style={{ display: "grid", gap: 24 }}><MyAccountSection /><PushToggle /></div></Section>}
           {isAdmin && <>
           <Section id="business" icon="building" title={t("settings.office")} hint={t("settings.officeHint")}
             footer={<button type="button" className="btn btn-primary" disabled={!changed(businessKeys) || busy !== ""} onClick={() => void persist(businessKeys)}>{t("common.saveChanges")}</button>}>
@@ -353,6 +357,11 @@ export default function SettingsPage({ section }: { section?: string }) {
                 <textarea rows={4} value={settings["wipe.statement"]} onChange={(e) => set("wipe.statement", e.target.value)} placeholder={t("wipe.defaultStatement")} /></label>
             </div>
           </Section>}
+          {isServerMode && <Section id="notifications" icon="bell" title={t("settings.notifications")} hint={t("settings.notificationsHint")}
+            footer={<button type="button" className="btn btn-primary" disabled={!changed(notifyKeys) || busy !== ""} onClick={() => void persist(notifyKeys)}>{t("common.saveChanges")}</button>}>
+            <NotificationSettings settings={settings} set={set} />
+          </Section>}
+          {isServerMode && <Section id="checklists" icon="check" title={t("checklist.templates")} hint={t("checklist.templatesHint")}><ChecklistTemplateSettings /></Section>}
           {isServerMode && <Section id="storage" icon="hardDrive" title={t("storage.title")} hint={t("storage.hint")}><StorageSettings /></Section>}
           {isServerMode && <Section id="activity" icon="activity" title={t("activity.title")} hint={t("activity.hint")}><AuditLogSettings /></Section>}
           </>}
@@ -388,6 +397,50 @@ export default function SettingsPage({ section }: { section?: string }) {
           </Section>}
           </OpenSection.Provider>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function NotificationSettings({ settings, set }: { settings: AppSettings; set: (key: SettingKey, value: string) => void }) {
+  const { t } = useI18n();
+  const [status, setStatus] = useState<MessagingStatus | null>(null);
+  useEffect(() => { messagingStatus().then(setStatus).catch(() => setStatus(null)); }, []);
+  const channel = (on: boolean | undefined, label: string) => (
+    <span className={`badge ${on ? "success" : ""}`}><Icon name={on ? "check" : "x"} size={12} />{label}: {t(on ? "settings.channelOn" : "settings.channelOff")}</span>
+  );
+  return (
+    <div style={{ display: "grid", gap: 20 }}>
+      <div style={{ display: "grid", gap: 8 }}>
+        <h3>{t("settings.channels")}</h3>
+        <div className="page-actions">{channel(status?.email, t("settings.channelEmail"))}{channel(status?.sms, t("settings.channelSms"))}{channel(status?.push, t("settings.channelPush"))}</div>
+        <p className="hint">{t("settings.channelsHint")}</p>
+      </div>
+      {(["received", "ready"] as const).map((event) => {
+        const key = (suffix: string) => `notify.${event}${suffix}` as SettingKey;
+        return (
+          <div key={event} style={{ display: "grid", gap: 10 }}>
+            <label className="check"><input type="checkbox" checked={settings[key("")] === "1"} onChange={(e) => set(key(""), e.target.checked ? "1" : "0")} /><strong>{t(`settings.notify.${event}`)}</strong></label>
+            {settings[key("")] === "1" && <div className="form-grid">
+              <label className="field full"><span>{t("settings.emailSubject")}</span><input value={settings[key("Subject")]} placeholder={defaultTemplates[event].subject} onChange={(e) => set(key("Subject"), e.target.value)} /></label>
+              <label className="field full"><span>{t("settings.emailBody")}</span><textarea rows={6} value={settings[key("Body")]} placeholder={defaultTemplates[event].body} onChange={(e) => set(key("Body"), e.target.value)} /></label>
+              <label className="field full"><span>{t("settings.smsText")}</span><textarea rows={2} value={settings[key("Sms")]} placeholder={defaultTemplates[event].sms} onChange={(e) => set(key("Sms"), e.target.value)} /></label>
+            </div>}
+          </div>
+        );
+      })}
+      <p className="hint">{t("settings.templateHint")}</p>
+      <div style={{ display: "grid", gap: 10 }}>
+        <h3>{t("settings.statusPage")}</h3>
+        <label className="check"><input type="checkbox" checked={settings["status.enabled"] === "1"} onChange={(e) => set("status.enabled", e.target.checked ? "1" : "0")} />{t("settings.statusEnabled")}</label>
+        <div className="form-grid">
+          <label className="field"><span>{t("settings.statusUrl")}</span><input value={settings["status.publicUrl"]} placeholder="https://shop.tail1234.ts.net:8443" onChange={(e) => set("status.publicUrl", e.target.value.trim())} /><small>{t("settings.statusUrlHint")}</small></label>
+          <label className="field"><span>{t("settings.statusLanguage")}</span>
+            <select value={settings["status.language"] || "en"} onChange={(e) => set("status.language", e.target.value)}>
+              <option value="en">English</option><option value="pt-PT">Português</option><option value="es">Español</option><option value="fr">Français</option>
+            </select></label>
+        </div>
+        <p className="hint">{t("settings.statusHint")}</p>
       </div>
     </div>
   );
