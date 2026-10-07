@@ -33,6 +33,15 @@ const icons = {
   database: [["path", "M3 5c0-1.66 4-3 9-3s9 1.34 9 3-4 3-9 3-9-1.34-9-3"], ["path", "M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5M3 12c0 1.66 4 3 9 3s9-1.34 9-3"]],
   globe: [["circle", 12, 12, 10], ["path", "M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"]],
   barcode: [["path", "M3 5v14M8 5v14M12 5v14M17 5v14M21 5v14"]],
+  camera: [["path", "M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"], ["circle", 12, 13, 3]],
+  image: [["rect", 3, 3, 18, 18, 2], ["circle", 9, 9, 2], ["path", "m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21"]],
+  upload: [["path", "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"], ["path", "m17 8-5-5-5 5M12 3v12"]],
+  download: [["path", "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"], ["path", "m7 10 5 5 5-5M12 15V3"]],
+  chevronLeft: [["path", "m15 18-6-6 6-6"]],
+  chevronRight: [["path", "m9 18 6-6-6-6"]],
+  hardDrive: [["path", "M22 12H2M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"], ["path", "M6 16h.01M10 16h.01"]],
+  checkSquare: [["rect", 3, 3, 18, 18, 2], ["path", "m9 12 2 2 4-4"]],
+  user: [["circle", 12, 8, 4], ["path", "M20 21a8 8 0 0 0-16 0"]],
 } satisfies Record<string, Shape[]>;
 
 export type IconName = keyof typeof icons;

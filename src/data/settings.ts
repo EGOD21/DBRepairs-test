@@ -5,7 +5,7 @@ import { isServerMode } from "./runtime";
 export const settingKeys = [
   "office.companyName", "office.taxNumber", "office.address", "office.phone", "office.email", "office.website", "office.logoDataUrl",
   "ui.theme", "print.autoPrint", "print.labelSize", "print.terms", "email.signature",
-  "app.icon192", "app.icon512", "app.iconMaskable", "app.iconApple",
+  "app.icon192", "app.icon512", "app.iconMaskable", "app.iconApple", "photos.autoDeleteDays",
 ] as const;
 
 export type SettingKey = typeof settingKeys[number];

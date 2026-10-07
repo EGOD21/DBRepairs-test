@@ -5,10 +5,12 @@ import { exportPortableBackup, importPortableBackup, PortableBackupError } from 
 import { createLoginLimiter, issueSession, readCookie, SESSION_COOKIE, sessionCookie, verifySession } from "./auth.js";
 import { ADMIN_USERNAME, findUserById, findUserByUsername, hashPassword, listUsers, newPassword, publicUser, userInput, verifyPassword } from "./users.js";
 import { registerChatRoutes } from "./chat.js";
+import { createPhotoStore, registerPhotoRoutes, removeFiles, startAutoPrune } from "./photos.js";
 
 const repairSelect = `SELECT r.*, c.name customer_name, c.email customer_email, c.phone customer_phone, c.mobile customer_mobile,
     c.company customer_company, s.code status_code, s.label_key status_label_key,
-    (SELECT COUNT(*) FROM repair_parts p WHERE p.repair_id = r.id AND p.status IN ('needed','ordered'))::integer parts_pending
+    (SELECT COUNT(*) FROM repair_parts p WHERE p.repair_id = r.id AND p.status IN ('needed','ordered'))::integer parts_pending,
+    (SELECT COUNT(*) FROM repair_photos ph WHERE ph.repair_id = r.id)::integer photo_count
   FROM repairs r
   JOIN customers c ON c.id = r.customer_id
   JOIN repair_statuses s ON s.id = r.status_id`;
@@ -98,7 +100,7 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof ValidationError) return reply.code(400).send({ error: error.message });
     if (error instanceof PortableBackupError) return reply.code(400).send({ error: error.message });
-    if (error.statusCode && error.statusCode >= 400 && error.statusCode < 500) {
+    if (error.statusCode && ((error.statusCode >= 400 && error.statusCode < 500) || error.statusCode === 503)) {
       return reply.code(error.statusCode).send({ error: error.message });
     }
     if (error.code === "23503") return reply.code(409).send({ error: "This record is still in use" });
@@ -180,6 +182,13 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
   });
 
   registerChatRoutes(app, pool, requireAdmin);
+
+  const photoStore = createPhotoStore(config.photosDir);
+  registerPhotoRoutes(app, pool, { store: photoStore, requireAdmin, readSettings });
+  if (config.autoPrunePhotos) {
+    const stopAutoPrune = startAutoPrune(pool, photoStore, readSettings, app.log);
+    app.addHook("onClose", async () => stopAutoPrune());
+  }
 
   app.get("/api/customers", async (request) => {
     const search = typeof request.query?.search === "string" ? request.query.search.trim() : "";
@@ -303,9 +312,35 @@ export function buildApp({ pool, config, logger = true, migrateDatabase }) {
   });
 
   // Status history and parts are removed with the repair (ON DELETE CASCADE).
+  // Photos are deleted with ?photos=delete; otherwise they are kept as archived
+  // photos that Settings > Storage can view or remove later.
   app.delete("/api/repairs/:id", async (request, reply) => {
-    const result = await pool.query("DELETE FROM repairs WHERE id=$1", [pathId(request.params.id)]);
-    if (!result.rowCount) return replyNotFound(reply);
+    const id = pathId(request.params.id);
+    const deletePhotos = request.query?.photos === "delete";
+    const client = await pool.connect();
+    let files = [];
+    try {
+      await client.query("BEGIN");
+      if (deletePhotos) {
+        files = (await client.query("DELETE FROM repair_photos WHERE repair_id=$1 RETURNING file_name, thumb_name", [id])).rows;
+      } else {
+        await client.query(`UPDATE repair_photos p SET archived_at=now(), customer_name=c.name
+          FROM repairs r JOIN customers c ON c.id = r.customer_id WHERE r.id = p.repair_id AND p.repair_id=$1`, [id]);
+      }
+      const result = await client.query("DELETE FROM repairs WHERE id=$1", [id]);
+      if (!result.rowCount) {
+        await client.query("ROLLBACK");
+        return replyNotFound(reply);
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+    // Files go only after the rows are committed, so a failure never leaves rows without files.
+    await removeFiles(photoStore, files, request.log);
     return reply.code(204).send();
   });
 

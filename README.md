@@ -29,6 +29,7 @@ The project is a clean rewrite with a shared React/TypeScript interface. It can 
 - Internal notes.
 - Search and filter repairs by status and open/closed state.
 - Suggestions for previously used device types, brands and models.
+- Server edition: any number of photos per repair, taken with a phone camera or uploaded from a computer, with a full-screen viewer, captions, downloads and A4 photo sheets (1, 2, 4 or 6 per page).
 
 ### Status workflow
 
@@ -71,6 +72,7 @@ Live overview with:
 
 ### Settings and data
 
+- Each settings area has its own page (`#/settings/appearance`, `#/settings/storage`, …).
 - Global application language.
 - Appearance: every color, the fonts and the corner roundness can be changed, with presets (HubSpot-style default, Neutral, Dark, Ocean).
 - Company logo shown in the sidebar, the browser tab, the sign-in page and on every ticket.
@@ -89,6 +91,7 @@ Live overview with:
 - Browser interface reusing the desktop workflow and translations.
 - Transactional HTTP API and automatic schema migrations.
 - Docker Compose stack for a server or Portainer.
+- Repair photos kept in their own Docker volume, with Settings → Storage to see usage, delete old photos or turn on automatic cleanup.
 - Manual and scheduled PostgreSQL backups with configurable retention.
 - Portable `.dbrepairs` backups for two-way transfer between SQLite and PostgreSQL.
 
@@ -110,7 +113,7 @@ Live overview with:
 Download the `.deb` package and install it with:
 
 ```bash
-sudo apt install ./DBRepairs_0.5.1_amd64.deb
+sudo apt install ./DBRepairs_0.6.0_amd64.deb
 ```
 
 ### Fedora / RHEL compatible distributions
@@ -118,7 +121,7 @@ sudo apt install ./DBRepairs_0.5.1_amd64.deb
 Download the `.rpm` package and install it with your distribution package manager, for example:
 
 ```bash
-sudo dnf install ./DBRepairs-0.5.1-1.x86_64.rpm
+sudo dnf install ./DBRepairs-0.6.0-1.x86_64.rpm
 ```
 
 ## Development
@@ -154,7 +157,7 @@ The desktop edition uses a local SQLite database. Application data is stored in 
 
 Use the built-in backup function before moving or reinstalling systems.
 
-The server edition stores shared data in its PostgreSQL Docker volume. Desktop and server data remain independent until a portable `.dbrepairs` backup is explicitly restored. This format transfers settings, statuses, customers, repairs and status history in either direction between SQLite and PostgreSQL.
+The server edition stores shared data in its PostgreSQL Docker volume, and repair photos as files in a separate `repair_photos` volume (see [docker/README.md](docker/README.md#repair-photos)). Desktop and server data remain independent until a portable `.dbrepairs` backup is explicitly restored. This format transfers settings, statuses, customers, repairs and status history in either direction between SQLite and PostgreSQL.
 
 ## Translation
 

@@ -1,4 +1,4 @@
-import { ChangeEvent, ReactNode, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, createContext, ReactNode, useContext, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import Icon, { IconName } from "../components/Icon";
 import LanguageDropdown from "../components/LanguageDropdown";
@@ -16,10 +16,16 @@ import { defaultLabelSize, labelSizes } from "../print/types";
 import { useSession } from "../session";
 import { emptyAppIcons, makeAppIcons } from "../lib/appIcons";
 import { MyAccountSection, TeamSection } from "../components/TeamSettings";
+import StorageSettings from "../components/StorageSettings";
+import { href } from "../router";
 
 type Notice = { tone: "success" | "error"; text: string } | null;
 
+// Each settings section is its own page (#/settings/<id>); only the open one renders.
+const OpenSection = createContext("");
+
 function Section({ id, icon, title, hint, children, footer }: { id: string; icon: IconName; title: string; hint?: string; children: ReactNode; footer?: ReactNode }) {
+  if (useContext(OpenSection) !== id) return null;
   return (
     <section className="card" id={id}>
       <div className="card-header"><div><h2 className="title-row"><Icon name={icon} size={17} />{title}</h2>{hint && <p>{hint}</p>}</div></div>
@@ -36,7 +42,7 @@ const csvCell = (value: unknown) => {
   return `"${text.replace(/"/g, '""')}"`;
 };
 
-export default function SettingsPage() {
+export default function SettingsPage({ section }: { section?: string }) {
   const { t, locale, setLocale, locales } = useI18n();
   const branding = useBranding();
   const { isAdmin, teamFeatures } = useSession();
@@ -198,21 +204,27 @@ export default function SettingsPage() {
     ...(isAdmin ? [["business", "building", t("settings.office")], ["appearance", "palette", t("settings.appearance")], ["printing", "printer", t("settings.printing")],
       ["email", "mail", t("settings.emailSection")]] as [string, IconName, string][] : []),
     ...(isAdmin && teamFeatures ? [["team", "users", t("team.title")] as [string, IconName, string]] : []),
+    ...(isAdmin && isServerMode ? [["storage", "hardDrive", t("storage.title")] as [string, IconName, string]] : []),
     ["language", "globe", t("settings.language")],
     ...(isAdmin ? [["data", "database", t("settings.data")] as [string, IconName, string]] : []),
   ];
 
+  // Admins start on the business details; techs on their own account.
+  const open = nav.some(([id]) => id === section) ? section! : (nav.find(([id]) => id === "business") ?? nav[0])[0];
+  const openLabel = nav.find(([id]) => id === open)?.[2] ?? "";
+
   return (
     <div className="page">
-      <header className="page-header"><div><h1>{t("settings.title")}</h1><p>{t("settings.subtitle")}</p></div></header>
+      <header className="page-header"><div><h1>{t("settings.title")}<span className="muted settings-crumb"> / {openLabel}</span></h1><p>{t("settings.subtitle")}</p></div></header>
       {notice && <div className={`alert ${notice.tone}`} role="status">{notice.text}</div>}
       <div className="settings-layout">
         <nav className="settings-nav" aria-label={t("settings.title")}>
           {nav.map(([id, icon, label]) => (
-            <a key={id} href={`#/settings`} onClick={(e) => { e.preventDefault(); document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" }); }}><Icon name={icon} size={16} />{label}</a>
+            <a key={id} href={href({ name: "settings", section: id })} className={id === open ? "active" : ""} aria-current={id === open ? "page" : undefined}><Icon name={icon} size={16} />{label}</a>
           ))}
         </nav>
         <div className="settings-sections">
+          <OpenSection.Provider value={open}>
           {teamFeatures && <Section id="account" icon="users" title={t("account.title")}><MyAccountSection /></Section>}
           {isAdmin && <>
           <Section id="business" icon="building" title={t("settings.office")} hint={t("settings.officeHint")}
@@ -294,6 +306,7 @@ export default function SettingsPage() {
           </Section>
 
           {teamFeatures && <Section id="team" icon="users" title={t("team.title")} hint={t("team.hint")}><TeamSection /></Section>}
+          {isServerMode && <Section id="storage" icon="hardDrive" title={t("storage.title")} hint={t("storage.hint")}><StorageSettings /></Section>}
           </>}
 
           <Section id="language" icon="globe" title={t("settings.language")} hint={t("settings.languageHint")}>
@@ -325,6 +338,7 @@ export default function SettingsPage() {
               </div>
             </div>
           </Section>}
+          </OpenSection.Provider>
         </div>
       </div>
     </div>

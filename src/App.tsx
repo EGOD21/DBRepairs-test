@@ -138,7 +138,7 @@ function Workspace({ onSignOut }: { onSignOut?: () => void }) {
         {route.name === "customer" && <CustomerProfilePage key={route.id} id={route.id} />}
         {route.name === "parts" && <PartsPage />}
         {route.name === "chat" && (teamFeatures ? <ChatPage /> : <DashboardPage />)}
-        {route.name === "settings" && <SettingsPage />}
+        {route.name === "settings" && <SettingsPage section={route.section} />}
       </main>
       <nav className="bottom-nav" aria-label={t("nav.main")}>
         {links.filter((link) => link.route.name !== "settings").map((link) => (
