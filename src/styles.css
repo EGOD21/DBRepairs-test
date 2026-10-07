@@ -160,8 +160,13 @@ td strong a, td a.strong { color: var(--foreground); font-weight: 600; }
 /* ---------- Toolbars, tabs, alerts ---------- */
 .toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--border-soft); }
 .toolbar .search { position: relative; flex: 1 1 280px; }
-.toolbar .search .icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--muted-foreground); }
-.toolbar .search input { padding-left: 34px; }
+.search { position: relative; }
+.search > .icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--muted-foreground); pointer-events: none; }
+.search > input { width: 100%; padding-left: 34px; }
+/* Camera scan button sits inside the right end of the search field */
+.search > .scan-btn { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 30px; height: 30px; min-height: 0; padding: 0; border: 0; background: transparent; color: var(--muted-foreground); }
+.search > .scan-btn:hover { background: var(--surface-muted); color: var(--foreground); }
+.search:has(> .scan-btn) > input { padding-right: 40px; }
 .toolbar select.input { width: auto; }
 .toolbar .count { margin-left: auto; color: var(--muted-foreground); font-size: 13px; }
 .segmented { display: inline-flex; padding: 3px; gap: 2px; background: var(--surface-muted); border-radius: var(--radius-sm); border: 1px solid var(--border-soft); }
